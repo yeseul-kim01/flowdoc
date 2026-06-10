@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlowDoc — place-order</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F4F6F9; --surface:#FFFFFF; --ink:#16202E; --muted:#5C6880; --faint:#8B96A8;
+    --border:#E4E8EF; --line:#D7DDE6;
+    --accent:#5B4BD6; --accent-soft:#ECEAFB; --accent-ink:#3A2EA8;
+    --tx:#9A5B00; --tx-bg:#FBEFD6; --tx-line:#E6B25C;
+    --sem:#B0303F; --sem-bg:#FBE2E5;
+    --async:#0E7C6B; --async-bg:#DAF1EC;
+    --ext:#1E5FA8; --ext-bg:#E4EDFA;
+    --cls:#2A6F97; --mth:#5B4BD6; --type:#7C6A4A;
+    --radius:12px;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --sans:'Inter',system-ui,sans-serif;
+    --display:'Space Grotesk',var(--sans);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:880px;margin:0 auto;padding:0 20px 80px}
+
+  /* ---- top bar ---- */
+  .topbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+    padding:26px 0 22px;border-bottom:1px solid var(--border);margin-bottom:24px}
+  .wordmark{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:-.02em;
+    display:flex;align-items:center;gap:9px}
+  .wordmark .glyph{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:8px;
+    background:var(--accent);color:#fff;font-size:15px}
+  .tagline{color:var(--muted);font-size:13.5px;margin-left:2px}
+  .seq-pill{margin-left:auto;display:flex;align-items:center;gap:10px;
+    background:var(--surface);border:1px solid var(--border);border-radius:999px;
+    padding:7px 7px 7px 15px;font-size:13px;color:var(--muted)}
+  .seq-pill b{font-family:var(--mono);font-weight:500;color:var(--ink);font-size:12.5px}
+  .seq-pill .tag{font-family:var(--mono);font-size:12px;background:var(--accent-soft);
+    color:var(--accent-ink);padding:4px 10px;border-radius:999px;font-weight:500}
+
+  .seq-title{font-family:var(--display);font-weight:600;font-size:19px;margin:0 0 4px}
+  .seq-desc{color:var(--muted);margin:0 0 18px;font-size:14px}
+
+  /* ---- legend ---- */
+  .legend{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 22px}
+  .legend .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;
+    padding:5px 10px;border-radius:999px;font-weight:500;font-family:var(--mono)}
+  .chip.tx{background:var(--tx-bg);color:var(--tx)}
+  .chip.sem{background:var(--sem-bg);color:var(--sem)}
+  .chip.async{background:var(--async-bg);color:var(--async)}
+  .chip.ext{background:var(--ext-bg);color:var(--ext)}
+  .chip .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+
+  /* ---- flow tree ---- */
+  .flow{display:flex;flex-direction:column;gap:8px}
+  .node{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    overflow:hidden;transition:border-color .15s}
+  .node:hover{border-color:var(--line)}
+  .node.open{border-color:var(--accent)}
+  .node-head{all:unset;display:flex;align-items:center;gap:12px;width:100%;
+    padding:14px 16px;cursor:pointer;box-sizing:border-box}
+  .node-head:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:var(--radius)}
+  .chev{color:var(--faint);font-size:13px;transition:transform .18s;flex:none;width:12px}
+  .node.open .chev{transform:rotate(90deg);color:var(--accent)}
+  .sig{font-family:var(--mono);font-size:13px;font-weight:400;flex:1;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sig .cls{color:var(--cls);font-weight:500}
+  .sig .mth{color:var(--mth);font-weight:700}
+  .sig .type{color:var(--type)}
+  .sig .pn{color:var(--ink)}
+  .sig .pun{color:var(--faint)}
+  .badges{display:flex;gap:6px;flex:none}
+  .badge{font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .b-route{background:var(--accent-soft);color:var(--accent-ink)}
+  .b-tx{background:var(--tx-bg);color:var(--tx)}
+  .b-sem{background:var(--sem-bg);color:var(--sem)}
+  .b-async{background:var(--async-bg);color:var(--async)}
+  .b-ext{background:var(--ext-bg);color:var(--ext)}
+  .b-repo{background:#EEF0F3;color:#56627A}
+
+  /* ---- transaction rail ---- */
+  .tx-group{position:relative;margin-left:22px;padding-left:20px;
+    border-left:2px solid var(--tx-line);display:flex;flex-direction:column;gap:8px;
+    padding-top:4px;padding-bottom:4px}
+  .tx-label{position:absolute;left:-2px;font-family:var(--mono);font-size:10.5px;
+    background:var(--tx-bg);color:var(--tx);padding:2px 8px;border-radius:5px;font-weight:500}
+  .tx-label.begin{top:-9px}
+  .tx-label.commit{bottom:-9px}
+  .child{margin-left:22px;border-left:2px solid var(--line);padding-left:20px}
+
+  /* ---- detail panel ---- */
+  .node-body{display:none;padding:0 16px 16px 40px;border-top:1px solid var(--border)}
+  .node.open .node-body{display:block}
+  .loc{font-family:var(--mono);font-size:12px;color:var(--faint);margin:12px 0 16px}
+  .loc::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--accent);margin-right:8px;vertical-align:middle}
+  .field{margin:0 0 16px}
+  .field-label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;
+    text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px}
+  .src{font-family:var(--mono);font-size:10px;font-weight:500;padding:2px 7px;border-radius:5px;
+    text-transform:none;letter-spacing:0}
+  .src.auto{background:#EEF0F3;color:#56627A}
+  .src.doc{background:var(--accent-soft);color:var(--accent-ink)}
+  .params{display:flex;flex-direction:column;gap:8px}
+  .param-row{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;align-items:baseline;
+    padding:9px 12px;background:var(--bg);border-radius:8px}
+  .param-sig{font-family:var(--mono);font-size:12.5px}
+  .param-sig .pn{color:var(--ink);font-weight:500}
+  .param-sig .type{color:var(--type)}
+  .param-note{grid-column:2;color:var(--muted);font-size:13px}
+  .ret{font-family:var(--mono);font-size:12.5px;padding:9px 12px;background:var(--bg);
+    border-radius:8px}
+  .ret .type{color:var(--type)}
+  .anns{display:flex;gap:6px;flex-wrap:wrap}
+  .ann{font-family:var(--mono);font-size:12px;padding:5px 10px;border-radius:7px;
+    background:var(--bg);border:1px solid var(--border);color:var(--ink)}
+  .ann.tx{border-color:var(--tx-line);color:var(--tx);background:var(--tx-bg)}
+  .ann.sem{border-color:#E79BA5;color:var(--sem);background:var(--sem-bg)}
+  .ann.async{border-color:#8FD3C7;color:var(--async);background:var(--async-bg)}
+  .desc{color:var(--ink);font-size:14px;line-height:1.7;margin:0;
+    padding:12px 14px;background:var(--accent-soft);border-radius:8px}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (max-width:560px){
+    .badges{display:none}
+    .node-body{padding-left:24px}
+    .wrap{padding:0 14px 60px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="wordmark"><span class="glyph">↳</span>FlowDoc</div>
+    <span class="tagline">내부 호출 흐름 문서</span>
+    <span class="seq-pill"><b>POST /orders</b><span class="tag">place-order</span></span>
+  </div>
+
+  <h1 class="seq-title">주문 생성 시퀀스</h1>
+  <p class="seq-desc">요청 한 개가 진입점에서 시작해 어떤 서비스의 어떤 함수를 거쳐 나가는지. 행을 누르면 Swagger처럼 파라미터·리턴·어노테이션·설명이 펼쳐진다.</p>
+
+  <div class="legend">
+    <span class="chip tx"><span class="dot"></span>트랜잭션 경계</span>
+    <span class="chip sem"><span class="dot"></span>세마포어 가드</span>
+    <span class="chip async"><span class="dot"></span>비동기 후처리</span>
+    <span class="chip ext"><span class="dot"></span>외부 호출</span>
+  </div>
+
+  <div class="flow">
+
+    <!-- entry point -->
+    <div class="node">
+      <button class="node-head" aria-expanded="false">
+        <span class="chev">›</span>
+        <span class="sig"><span class="cls">OrderController</span><span class="pun">.</span><span class="mth">placeOrder</span><span class="pun">(</span><span class="pn">req</span><span class="pun">: </span><span class="type">PlaceOrderRequest</span><span class="pun">): </span><span class="type">OrderResponse</span></span>
+        <span class="badges"><span class="badge b-route">POST /orders</span><span class="badge b-route">@FlowEntry</span></span>
+      </button>
+      <div class="node-body">
+        <div class="loc">OrderController.java:42</div>
+        <div class="field"><div class="field-label">파라미터 <span class="src auto">auto</span></div>
+          <div class="params"><div class="param-row">
+            <span class="param-sig"><span class="pn">req</span>: <span class="type">PlaceOrderRequest</span></span>
+            <span class="param-note">장바구니 항목, 배송지, 결제 수단을 담은 주문 요청 바디</span>
+          </div></div></div>
+        <div class="field"><div class="field-label">리턴 <span class="src auto">auto</span></div>
+          <div class="ret"><span class="type">OrderResponse</span> — 생성된 주문 ID와 상태</div></div>
+        <div class="field"><div class="field-label">어노테이션 <span class="src auto">auto</span></div>
+          <div class="anns"><span class="ann">@PostMapping("/orders")</span><span class="ann">@FlowEntry("place-order")</span></div></div>
+        <div class="field"><div class="field-label">설명 <span class="src doc">doc</span></div>
+          <p class="desc">주문 생성 진입점. 요청을 검증하고 도메인 커맨드로 변환한 뒤 OrderService에 위임한다.</p></div>
+      </div>
+    </div>
+
+    <!-- transactional method opens the rail -->
+    <div class="node">
+      <button class="node-head" aria-expanded="false">
+        <span class="chev">›</span>
+        <span class="sig"><span class="cls">OrderService</span><span class="pun">.</span><span class="mth">createOrder</span><span class="pun">(</span><span class="pn">cmd</span><span class="pun">: </span><span class="type">CreateOrderCommand</span><span class="pun">): </span><span class="type">Order</span></span>
+        <span class="badges"><span class="badge b-tx">@Transactional</span></span>
+      </button>
+      <div class="node-body">
+        <div class="loc">OrderService.java:88</div>
+        <div class="field"><div class="field-label">어노테이션 <span class="src auto">auto</span></div>
+          <div class="anns"><span class="ann tx">@Transactional(propagation = REQUIRED)</span></div></div>
+        <div class="field"><div class="field-label">설명 <span class="src doc">doc</span></div>
+          <p class="desc">재고 예약 → 결제 → 저장 → 이벤트 발행을 하나의 트랜잭션으로 묶는다. 어느 단계든 실패하면 전체 롤백된다. 아래 묶음이 이 트랜잭션 안에서 실행되는 호출들이다.</p></div>
+      </div>
+    </div>
+
+    <div class="tx-group">
+      <span class="tx-label begin">tx begin</span>
+
+      <!-- semaphore-guarded call -->
+      <div class="node">
+        <button class="node-head" aria-expanded="false">
+          <span class="chev">›</span>
+          <span class="sig"><span class="cls">InventoryService</span><span class="pun">.</span><span class="mth">reserve</span><span class="pun">(</span><span class="pn">items</span><span class="pun">: </span><span class="type">List&lt;OrderItem&gt;</span><span class="pun">): </span><span class="type">ReservationId</span></span>
+          <span class="badges"><span class="badge b-sem">@Guarded</span></span>
+        </button>
+        <div class="node-body">
+          <div class="loc">InventoryService.java:55</div>
+          <div class="field"><div class="field-label">파라미터 <span class="src auto">auto</span></div>
+            <div class="params"><div class="param-row">
+              <span class="param-sig"><span class="pn">items</span>: <span class="type">List&lt;OrderItem&gt;</span></span>
+              <span class="param-note">예약할 SKU와 수량 목록</span>
+            </div></div></div>
+          <div class="field"><div class="field-label">리턴 <span class="src auto">auto</span></div>
+            <div class="ret"><span class="type">ReservationId</span> — 예약 식별자 (롤백 시 해제 키)</div></div>
+          <div class="field"><div class="field-label">어노테이션 <span class="src auto">auto</span></div>
+            <div class="anns"><span class="ann sem">@Guarded(semaphore = "inventory", permits = 1)</span></div></div>
+          <div class="field"><div class="field-label">설명 <span class="src doc">doc</span></div>
+            <p class="desc">동시 주문이 같은 SKU 재고를 초과 차감하지 못하도록 세마포어로 보호한다. permits=1 이라 SKU별 임계 구역에서 한 번에 하나만 진입한다.</p></div>
+        </div>
+      </div>
+
+      <!-- payment with nested external call -->
+      <div class="node">
+        <button class="node-head" aria-expanded="false">
+          <span class="chev">›</span>
+          <span class="sig"><span class="cls">PaymentService</span><span class="pun">.</span><span class="mth">charge</span><span class="pun">(</span><span class="pn">order</span><span class="pun">, </span><span class="pn">card</span><span class="pun">): </span><span class="type">PaymentResult</span></span>
+        </button>
+        <div class="node-body">
+          <div class="loc">PaymentService.java:34</div>
+          <div class="field"><div class="field-label">리턴 <span class="src auto">auto</span></div>
+            <div class="ret"><span class="type">PaymentResult</span> — 승인 토큰과 결제 상태</div></div>
+          <div class="field"><div class="field-label">설명 <span class="src doc">doc</span></div>
+            <p class="desc">외부 PG에 승인을 요청한다. 실패하면 예외를 던져 트랜잭션을 롤백시키고, 위의 재고 예약도 함께 해제된다.</p></div>
+        </div>
+      </div>
+
+      <div class="child">
+        <div class="node">
+          <button class="node-head" aria-expanded="false">
+            <span class="chev">›</span>
+            <span class="sig"><span class="cls">PaymentGateway</span><span class="pun">.</span><span class="mth">authorize</span><span class="pun">(…): </span><span class="type">AuthToken</span></span>
+            <span class="badges"><span class="badge b-ext">external</span></span>
+          </button>
+          <div class="node-body">
+            <div class="loc">외부 시스템 · com.pg.client.PaymentGateway</div>
+            <div class="field"><div class="field-label">설명 <span class="src doc">doc</span></div>
+              <p class="desc">FlowDoc 범위 밖의 외부 호출. 노드로는 그리되 내부를 더 파고들지 않고 경계로 표시한다.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- repository save -->
+      <div class="node">
+        <button class="node-head" aria-expanded="false">
+          <span class="chev">›</span>
+          <span class="sig"><span class="cls">OrderRepository</span><span class="pun">.</span><span class="mth">save</span><span class="pun">(</span><span class="pn">order</span><span class="pun">: </span><span class="type">Order</span><span class="pun">): </span><span class="type">Order</span></span>
+          <span class="badges"><span class="badge b-repo">@Repository</span></span>
+        </button>
+        <div class="node-body">
+          <div class="loc">OrderRepository.java (Spring Data) </div>
+          <div class="field"><div class="field-label">리턴 <span class="src auto">auto</span></div>
+            <div class="ret"><span class="type">Order</span> — 영속화된 주문 (ID 채번 완료)</div></div>
+        </div>
+      </div>
+
+      <!-- domain event -->
+      <div class="node">
+        <button class="node-head" aria-expanded="false">
+          <span class="chev">›</span>
+          <span class="sig"><span class="cls">DomainEvents</span><span class="pun">.</span><span class="mth">publish</span><span class="pun">(</span><span class="type">OrderPlaced</span><span class="pun">)</span></span>
+        </button>
+        <div class="node-body">
+          <div class="loc">DomainEvents.java:20</div>
+          <div class="field"><div class="field-label">설명 <span class="src doc">doc</span></div>
+            <p class="desc">OrderPlaced 이벤트를 발행한다. 트랜잭션 커밋 이후 단계로 전파된다.</p></div>
+        </div>
+      </div>
+
+      <span class="tx-label commit">commit</span>
+    </div>
+
+    <!-- async post-commit, outside the transaction -->
+    <div class="node">
+      <button class="node-head" aria-expanded="false">
+        <span class="chev">›</span>
+        <span class="sig"><span class="cls">NotificationService</span><span class="pun">.</span><span class="mth">sendConfirmation</span><span class="pun">(</span><span class="pn">order</span><span class="pun">: </span><span class="type">Order</span><span class="pun">)</span></span>
+        <span class="badges"><span class="badge b-async">@Async</span></span>
+      </button>
+      <div class="node-body">
+        <div class="loc">NotificationService.java:71</div>
+        <div class="field"><div class="field-label">어노테이션 <span class="src auto">auto</span></div>
+          <div class="anns"><span class="ann async">@Async</span></div></div>
+        <div class="field"><div class="field-label">설명 <span class="src doc">doc</span></div>
+          <p class="desc">커밋이 끝난 뒤 별도 스레드에서 확인 알림을 보낸다. 메인 트랜잭션 밖이라 여기서 실패해도 주문은 롤백되지 않는다.</p></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.node-head').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var node = btn.closest('.node');
+      var open = node.classList.toggle('open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  });
+</script>
+</body>
+</html>
