@@ -1,0 +1,25 @@
+# --- Gradle / Java build output ---
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+hs_err_pid*
+
+# --- IDE ---
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+*.code-workspace
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Scanner output written to the repo root during local runs ---
+/flowdoc.json
