@@ -1,0 +1,170 @@
+{
+  "flowdoc" : "0.1",
+  "source" : {
+    "language" : "java",
+    "framework" : "spring-boot",
+    "collector" : "static"
+  },
+  "nodes" : [ {
+    "id" : "com.shop.order.OrderService#createOrder(PlaceOrderRequest)",
+    "simpleName" : "createOrder",
+    "owner" : "OrderService",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/shop/order/OrderService.java",
+      "line" : 9
+    },
+    "auto" : {
+      "params" : [ {
+        "name" : "request",
+        "type" : "PlaceOrderRequest"
+      } ],
+      "returns" : {
+        "type" : "Order"
+      },
+      "annotations" : [ {
+        "name" : "Transactional",
+        "attributes" : { }
+      } ]
+    },
+    "markers" : {
+      "transaction" : {
+        "boundary" : "open"
+      }
+    }
+  }, {
+    "id" : "com.shop.order.OrderService#reserveSeat(PlaceOrderRequest)",
+    "simpleName" : "reserveSeat",
+    "owner" : "OrderService",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/shop/order/OrderService.java",
+      "line" : 15
+    },
+    "auto" : {
+      "params" : [ {
+        "name" : "request",
+        "type" : "PlaceOrderRequest"
+      } ],
+      "annotations" : [ {
+        "name" : "Guarded",
+        "attributes" : {
+          "resource" : "\"inventory\"",
+          "permits" : "1"
+        }
+      } ]
+    }
+  }, {
+    "id" : "com.shop.order.OrderService#save(PlaceOrderRequest)",
+    "simpleName" : "save",
+    "owner" : "OrderService",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/shop/order/OrderService.java",
+      "line" : 20
+    },
+    "auto" : {
+      "params" : [ {
+        "name" : "request",
+        "type" : "PlaceOrderRequest"
+      } ],
+      "returns" : {
+        "type" : "Order"
+      },
+      "annotations" : [ ]
+    }
+  }, {
+    "id" : "com.shop.order.OrderController#placeOrder(PlaceOrderRequest)",
+    "simpleName" : "placeOrder",
+    "owner" : "OrderController",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/shop/order/OrderController.java",
+      "line" : 10
+    },
+    "auto" : {
+      "params" : [ {
+        "name" : "request",
+        "type" : "PlaceOrderRequest"
+      } ],
+      "returns" : {
+        "type" : "Order"
+      },
+      "annotations" : [ {
+        "name" : "FlowEntry",
+        "attributes" : {
+          "value" : "\"place-order\""
+        }
+      }, {
+        "name" : "PostMapping",
+        "attributes" : { }
+      } ]
+    }
+  }, {
+    "id" : "com.shop.order.InventoryService#reserve(PlaceOrderRequest)",
+    "simpleName" : "reserve",
+    "owner" : "InventoryService",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/shop/order/InventoryService.java",
+      "line" : 5
+    },
+    "auto" : {
+      "params" : [ {
+        "name" : "request",
+        "type" : "PlaceOrderRequest"
+      } ],
+      "annotations" : [ ]
+    }
+  } ],
+  "edges" : [ {
+    "from" : "com.shop.order.OrderService#createOrder(PlaceOrderRequest)",
+    "to" : "com.shop.order.InventoryService#reserve(PlaceOrderRequest)",
+    "callType" : "sync",
+    "site" : {
+      "file" : "com/shop/order/OrderService.java",
+      "line" : 11
+    },
+    "resolution" : "concrete"
+  }, {
+    "from" : "com.shop.order.OrderService#createOrder(PlaceOrderRequest)",
+    "to" : "com.shop.order.OrderService#save(PlaceOrderRequest)",
+    "callType" : "sync",
+    "site" : {
+      "file" : "com/shop/order/OrderService.java",
+      "line" : 12
+    },
+    "resolution" : "concrete"
+  }, {
+    "from" : "com.shop.order.OrderService#reserveSeat(PlaceOrderRequest)",
+    "to" : "com.shop.order.InventoryService#reserve(PlaceOrderRequest)",
+    "callType" : "sync",
+    "site" : {
+      "file" : "com/shop/order/OrderService.java",
+      "line" : 17
+    },
+    "resolution" : "concrete"
+  }, {
+    "from" : "com.shop.order.OrderController#placeOrder(PlaceOrderRequest)",
+    "to" : "com.shop.order.OrderService#createOrder(PlaceOrderRequest)",
+    "callType" : "sync",
+    "site" : {
+      "file" : "com/shop/order/OrderController.java",
+      "line" : 13
+    },
+    "resolution" : "concrete"
+  } ],
+  "guards" : [ {
+    "nodeId" : "com.shop.order.OrderService#reserveSeat(PlaceOrderRequest)",
+    "type" : "semaphore",
+    "resource" : "inventory",
+    "permits" : 1,
+    "source" : "declared"
+  } ],
+  "sequences" : [ {
+    "tag" : "place-order",
+    "entry" : "com.shop.order.OrderController#placeOrder(PlaceOrderRequest)",
+    "transactions" : [ ]
+  } ],
+  "traces" : [ ]
+}
