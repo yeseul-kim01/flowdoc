@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlowDoc</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F4F6F9; --surface:#FFFFFF; --ink:#16202E; --muted:#5C6880; --faint:#8B96A8;
+    --border:#E4E8EF; --line:#D7DDE6;
+    --accent:#5B4BD6; --accent-soft:#ECEAFB; --accent-ink:#3A2EA8;
+    --tx:#9A5B00; --tx-bg:#FBEFD6; --tx-line:#E6B25C;
+    --sem:#B0303F; --sem-bg:#FBE2E5;
+    --async:#0E7C6B; --async-bg:#DAF1EC;
+    --ext:#1E5FA8; --ext-bg:#E4EDFA;
+    --cls:#2A6F97; --mth:#5B4BD6; --type:#7C6A4A;
+    --radius:12px;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --sans:'Inter',system-ui,sans-serif;
+    --display:'Space Grotesk',var(--sans);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+
+  .app{display:flex;align-items:flex-start;min-height:100vh}
+
+  /* ---- sidebar ---- */
+  .sidebar{width:296px;flex:none;position:sticky;top:0;height:100vh;overflow-y:auto;
+    background:var(--surface);border-right:1px solid var(--border);padding:22px 18px;
+    display:flex;flex-direction:column;gap:20px}
+  .wordmark{font-family:var(--display);font-weight:700;font-size:21px;letter-spacing:-.02em;
+    display:flex;align-items:center;gap:9px}
+  .wordmark .glyph{display:inline-grid;place-items:center;width:29px;height:29px;border-radius:8px;
+    background:var(--accent);color:#fff;font-size:15px}
+  .wordmark .tag{font-family:var(--sans);font-weight:500;font-size:12px;color:var(--muted);margin-left:auto}
+
+  .sb-section-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--faint);margin:0 0 9px}
+
+  .specbox{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 13px;
+    font-size:12.5px;color:var(--muted)}
+  .specbox .src-meta{font-family:var(--mono);font-size:11.5px;color:var(--ink);margin-bottom:4px;word-break:break-all}
+  .specbox .counts{font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .specbox button{margin-top:10px;font-family:var(--sans);font-size:12px;font-weight:500;
+    background:var(--accent-soft);color:var(--accent-ink);border:none;border-radius:7px;
+    padding:6px 11px;cursor:pointer}
+  .specbox button:hover{background:#e0ddf7}
+
+  .seq-list{display:flex;flex-direction:column;gap:5px}
+  .seq-item{all:unset;display:block;cursor:pointer;border:1px solid var(--border);border-radius:9px;
+    padding:10px 12px;transition:border-color .12s,background .12s}
+  .seq-item:hover{border-color:var(--line);background:var(--bg)}
+  .seq-item.active{border-color:var(--accent);background:var(--accent-soft)}
+  .seq-item .stag{font-family:var(--mono);font-size:12.5px;color:var(--accent-ink);font-weight:500}
+  .seq-item .sentry{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:3px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .seq-item.active .sentry{color:var(--muted)}
+
+  .legend{display:flex;flex-direction:column;gap:7px}
+  .legend .chip{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;
+    font-weight:500;font-family:var(--mono);color:var(--muted)}
+  .legend .sw{width:9px;height:9px;border-radius:3px;flex:none}
+  .sw.tx{background:var(--tx-line)} .sw.sem{background:var(--sem)}
+  .sw.async{background:var(--async)} .sw.ext{background:var(--ext)}
+
+  /* ---- main ---- */
+  .main{flex:1;min-width:0;max-width:900px;margin:0 auto;padding:30px 30px 80px}
+  .seq-head{border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:22px}
+  .seq-route{display:inline-flex;align-items:center;gap:9px;margin-bottom:11px}
+  .seq-route .verb{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--ink)}
+  .seq-route .pill{font-family:var(--mono);font-size:12px;background:var(--accent-soft);
+    color:var(--accent-ink);padding:4px 10px;border-radius:999px;font-weight:500}
+  .seq-title{font-family:var(--display);font-weight:600;font-size:20px;margin:0 0 5px}
+  .seq-desc{color:var(--muted);margin:0;font-size:14px}
+
+  /* ---- flow tree (from prototype) ---- */
+  .flow{display:flex;flex-direction:column;gap:8px}
+  .node{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    overflow:hidden;transition:border-color .15s}
+  .node:hover{border-color:var(--line)}
+  .node.open{border-color:var(--accent)}
+  .node-head{all:unset;display:flex;align-items:center;gap:12px;width:100%;
+    padding:14px 16px;cursor:pointer;box-sizing:border-box}
+  .node-head:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:var(--radius)}
+  .chev{color:var(--faint);font-size:13px;transition:transform .18s;flex:none;width:12px}
+  .node.open .chev{transform:rotate(90deg);color:var(--accent)}
+  .node.leaf .chev{visibility:hidden}
+  .sig{font-family:var(--mono);font-size:13px;font-weight:400;flex:1;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sig .cls{color:var(--cls);font-weight:500}
+  .sig .mth{color:var(--mth);font-weight:700}
+  .sig .type{color:var(--type)}
+  .sig .pn{color:var(--ink)}
+  .sig .pun{color:var(--faint)}
+  .badges{display:flex;gap:6px;flex:none}
+  .badge{font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .b-route{background:var(--accent-soft);color:var(--accent-ink)}
+  .b-tx{background:var(--tx-bg);color:var(--tx)}
+  .b-sem{background:var(--sem-bg);color:var(--sem)}
+  .b-async{background:var(--async-bg);color:var(--async)}
+  .b-ext{background:var(--ext-bg);color:var(--ext)}
+  .b-repo{background:#EEF0F3;color:#56627A}
+  .b-cycle{background:#F0ECFB;color:var(--accent-ink)}
+
+  .tx-group{position:relative;margin-left:22px;padding-left:20px;
+    border-left:2px solid var(--tx-line);display:flex;flex-direction:column;gap:8px;
+    padding-top:4px;padding-bottom:4px;margin-top:8px}
+  .tx-label{position:absolute;left:-2px;font-family:var(--mono);font-size:10.5px;
+    background:var(--tx-bg);color:var(--tx);padding:2px 8px;border-radius:5px;font-weight:500}
+  .tx-label.begin{top:-9px}
+  .tx-label.commit{bottom:-9px}
+  .child{margin-left:22px;border-left:2px solid var(--line);padding-left:20px;
+    display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .child.async-out{border-left-style:dashed;border-color:var(--async)}
+
+  .node-body{display:none;padding:0 16px 16px 40px;border-top:1px solid var(--border)}
+  .node.open .node-body{display:block}
+  .loc{font-family:var(--mono);font-size:12px;color:var(--faint);margin:12px 0 16px}
+  .loc::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--accent);margin-right:8px;vertical-align:middle}
+  .field{margin:0 0 16px}
+  .field-label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;
+    text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px}
+  .src{font-family:var(--mono);font-size:10px;font-weight:500;padding:2px 7px;border-radius:5px;
+    text-transform:none;letter-spacing:0}
+  .src.auto{background:#EEF0F3;color:#56627A}
+  .src.doc{background:var(--accent-soft);color:var(--accent-ink)}
+  .params{display:flex;flex-direction:column;gap:8px}
+  .param-row{display:grid;grid-template-columns:1fr;gap:4px 14px;align-items:baseline;
+    padding:9px 12px;background:var(--bg);border-radius:8px}
+  .param-sig{font-family:var(--mono);font-size:12.5px}
+  .param-sig .pn{color:var(--ink);font-weight:500}
+  .param-sig .type{color:var(--type)}
+  .param-note{color:var(--muted);font-size:13px}
+  .ret{font-family:var(--mono);font-size:12.5px;padding:9px 12px;background:var(--bg);border-radius:8px}
+  .ret .type{color:var(--type)}
+  .anns{display:flex;gap:6px;flex-wrap:wrap}
+  .ann{font-family:var(--mono);font-size:12px;padding:5px 10px;border-radius:7px;
+    background:var(--bg);border:1px solid var(--border);color:var(--ink)}
+  .ann.tx{border-color:var(--tx-line);color:var(--tx);background:var(--tx-bg)}
+  .ann.sem{border-color:#E79BA5;color:var(--sem);background:var(--sem-bg)}
+  .ann.async{border-color:#8FD3C7;color:var(--async);background:var(--async-bg)}
+  .desc{color:var(--ink);font-size:14px;line-height:1.7;margin:0;
+    padding:12px 14px;background:var(--accent-soft);border-radius:8px}
+
+  /* ---- empty state ---- */
+  .empty{max-width:560px;margin:12vh auto 0;text-align:center;padding:0 20px}
+  .empty .glyph{display:inline-grid;place-items:center;width:54px;height:54px;border-radius:14px;
+    background:var(--accent);color:#fff;font-size:26px;font-family:var(--display);margin-bottom:18px}
+  .empty h1{font-family:var(--display);font-weight:600;font-size:23px;margin:0 0 8px}
+  .empty p{color:var(--muted);margin:0 0 22px}
+  .dropzone{border:2px dashed var(--line);border-radius:14px;padding:34px 22px;background:var(--surface);
+    transition:border-color .15s,background .15s;cursor:pointer}
+  .dropzone.drag{border-color:var(--accent);background:var(--accent-soft)}
+  .dropzone b{color:var(--accent-ink)}
+  .empty .hint{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:18px;line-height:1.9;text-align:left;
+    background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .empty .hint .c{color:var(--ink)}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (max-width:820px){
+    .app{flex-direction:column}
+    .sidebar{width:100%;height:auto;position:static;border-right:none;border-bottom:1px solid var(--border)}
+    .badges{display:none}
+    .main{padding:22px 16px 60px}
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app"><!-- rendered by JS --></div>
+
+<input type="file" id="filein" accept=".json,application/json" hidden>
+
+<script>
+"use strict";
+
+const MAX_DEPTH = 30;
+
+const VERB = {
+  GetMapping:"GET", PostMapping:"POST", PutMapping:"PUT",
+  DeleteMapping:"DELETE", PatchMapping:"PATCH", RequestMapping:"REQ"
+};
+const ENTRY_ANNS = new Set([...Object.keys(VERB),
+  "KafkaListener","RabbitListener","JmsListener","EventListener","Scheduled","MessageMapping"]);
+
+const state = { spec:null, nodesById:{}, adjacency:{}, guardsById:{}, seqIndex:0 };
+
+/* ---------------- loading ---------------- */
+
+function indexSpec(spec){
+  const nodesById = {};
+  (spec.nodes||[]).forEach(n => nodesById[n.id] = n);
+  const adjacency = {};
+  (spec.edges||[]).forEach(e => { (adjacency[e.from] ||= []).push(e); });
+  const guardsById = {};
+  (spec.guards||[]).forEach(g => guardsById[g.nodeId] = g);
+  state.spec = spec; state.nodesById = nodesById;
+  state.adjacency = adjacency; state.guardsById = guardsById; state.seqIndex = 0;
+}
+
+function loadSpec(spec){
+  indexSpec(spec);
+  render();
+}
+
+async function tryAutoLoad(){
+  const url = new URLSearchParams(location.search).get("spec") || "./flowdoc.json";
+  try{
+    const res = await fetch(url, {cache:"no-store"});
+    if(!res.ok) throw new Error(res.status);
+    loadSpec(await res.json());
+  }catch(e){
+    renderEmpty();
+  }
+}
+
+function loadFromFile(file){
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{ loadSpec(JSON.parse(reader.result)); }
+    catch(err){ alert("flowdoc.json 파싱 실패: " + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+/* ---------------- helpers ---------------- */
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const unquote = s => (typeof s==="string" && s.length>=2 && s[0]==='"' && s.endsWith('"')) ? s.slice(1,-1) : s;
+
+function annByName(node, name){
+  return (node.auto?.annotations||[]).find(a => a.name === name);
+}
+function isTransactional(node){
+  return !!(node.markers?.transaction) || !!annByName(node,"Transactional");
+}
+function isAsync(node){ return !!annByName(node,"Async"); }
+function routeOf(node){
+  for(const a of (node.auto?.annotations||[])){
+    if(VERB[a.name]){
+      const path = a.attributes ? unquote(a.attributes.value || a.attributes.path || "") : "";
+      return { verb: VERB[a.name], path };
+    }
+  }
+  return null;
+}
+
+/* ---------------- tree ---------------- */
+
+function buildTree(entryId){
+  const onPath = new Set();
+  function visit(id, depth){
+    const node = state.nodesById[id];
+    if(!node) return null;                       // external / unresolved — not a drawn node
+    const tn = { id, depth, cyclic:false, capped:false, children:[] };
+    if(onPath.has(id)){ tn.cyclic = true; return tn; }
+    if(depth >= MAX_DEPTH){ tn.capped = true; return tn; }
+    onPath.add(id);
+    for(const e of (state.adjacency[id]||[])){
+      const child = visit(e.to, depth+1);
+      if(child){ child.edge = e; tn.children.push(child); }
+    }
+    onPath.delete(id);
+    return tn;
+  }
+  return visit(entryId, 0);
+}
+
+/* ---------------- rendering: signature & badges ---------------- */
+
+function renderSig(node){
+  const owner = node.owner || (node.id.split("#")[0].split(".").pop());
+  const name = node.simpleName || (node.id.split("#")[1]||"").split("(")[0];
+  const params = (node.auto?.params||[])
+    .map(p => `<span class="pn">${esc(p.name)}</span><span class="pun">: </span><span class="type">${esc(p.type)}</span>`)
+    .join('<span class="pun">, </span>');
+  const ret = node.auto?.returns?.type
+    ? `<span class="pun">): </span><span class="type">${esc(node.auto.returns.type)}</span>`
+    : `<span class="pun">)</span>`;
+  return `<span class="cls">${esc(owner)}</span><span class="pun">.</span>`
+       + `<span class="mth">${esc(name)}</span><span class="pun">(</span>${params}${ret}`;
+}
+
+function badgesFor(node, tn, isEntry){
+  const out = [];
+  const r = routeOf(node);
+  if(r) out.push(`<span class="badge b-route">${esc(r.verb)}${r.path ? " "+esc(r.path) : ""}</span>`);
+  if(isEntry && annByName(node,"FlowEntry"))
+    out.push(`<span class="badge b-route">@FlowEntry</span>`);
+  if(isTransactional(node)) out.push(`<span class="badge b-tx">@Transactional</span>`);
+  if(state.guardsById[node.id]) out.push(`<span class="badge b-sem">@Guarded</span>`);
+  if(isAsync(node)) out.push(`<span class="badge b-async">@Async</span>`);
+  if(annByName(node,"FlowExternal")) out.push(`<span class="badge b-ext">external</span>`);
+  if(annByName(node,"Repository")) out.push(`<span class="badge b-repo">@Repository</span>`);
+  if(tn && tn.cyclic) out.push(`<span class="badge b-cycle">↻ 순환</span>`);
+  return out.join("");
+}
+
+/* ---------------- rendering: detail body ---------------- */
+
+function annClass(name){
+  if(name==="Transactional") return " tx";
+  if(name==="Guarded") return " sem";
+  if(name==="Async") return " async";
+  return "";
+}
+function annText(a){
+  if(!a.attributes || !Object.keys(a.attributes).length) return "@"+a.name;
+  const inner = Object.entries(a.attributes)
+    .map(([k,v]) => k==="value" ? unquote(v) : `${k} = ${unquote(v)}`)
+    .join(", ");
+  return `@${a.name}(${inner})`;
+}
+
+function renderBody(node){
+  const loc = node.location
+    ? `${node.location.file||"?"}${node.location.line ? ":"+node.location.line : ""}`
+    : node.id;
+  let html = `<div class="node-body"><div class="loc">${esc(loc)}</div>`;
+
+  const params = node.auto?.params || [];
+  if(params.length){
+    html += `<div class="field"><div class="field-label">파라미터 <span class="src auto">auto</span></div><div class="params">`;
+    for(const p of params){
+      const doc = node.declared?.paramDocs?.[p.name];
+      html += `<div class="param-row"><span class="param-sig"><span class="pn">${esc(p.name)}</span>: <span class="type">${esc(p.type)}</span></span>`;
+      if(doc) html += `<span class="param-note">${esc(doc)}</span>`;
+      html += `</div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  if(node.auto?.returns?.type){
+    html += `<div class="field"><div class="field-label">리턴 <span class="src auto">auto</span></div>`
+         +  `<div class="ret"><span class="type">${esc(node.auto.returns.type)}</span></div></div>`;
+  }
+
+  const anns = node.auto?.annotations || [];
+  if(anns.length){
+    html += `<div class="field"><div class="field-label">어노테이션 <span class="src auto">auto</span></div><div class="anns">`;
+    html += anns.map(a => `<span class="ann${annClass(a.name)}">${esc(annText(a))}</span>`).join("");
+    html += `</div></div>`;
+  }
+
+  if(node.declared?.description){
+    html += `<div class="field"><div class="field-label">설명 <span class="src doc">doc</span></div>`
+         +  `<p class="desc">${esc(node.declared.description)}</p></div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+/* ---------------- rendering: node + children ---------------- */
+
+function renderTreeNode(tn, isEntry){
+  const node = state.nodesById[tn.id];
+  const badges = badgesFor(node, tn, isEntry);
+  const leaf = tn.children.length === 0;
+
+  let html = `<div class="node${leaf ? " leaf":""}">`
+    + `<button class="node-head" aria-expanded="false"><span class="chev">›</span>`
+    + `<span class="sig">${renderSig(node)}</span>`
+    + `<span class="badges">${badges}</span></button>`
+    + renderBody(node)
+    + `</div>`;
+
+  if(tn.children.length){
+    if(isTransactional(node)){
+      const asyncKids = tn.children.filter(c => isAsync(state.nodesById[c.id]));
+      const txKids    = tn.children.filter(c => !isAsync(state.nodesById[c.id]));
+      if(txKids.length){
+        html += `<div class="tx-group"><span class="tx-label begin">tx begin</span>`
+              + txKids.map(c => renderTreeNode(c,false)).join("")
+              + `<span class="tx-label commit">commit</span></div>`;
+      }
+      if(asyncKids.length){               // async post-commit lives OUTSIDE the rail
+        html += `<div class="child async-out">`
+              + asyncKids.map(c => renderTreeNode(c,false)).join("") + `</div>`;
+      }
+    } else {
+      html += `<div class="child">`
+            + tn.children.map(c => renderTreeNode(c,false)).join("") + `</div>`;
+    }
+  }
+  return html;
+}
+
+/* ---------------- rendering: shells ---------------- */
+
+function render(){
+  const spec = state.spec;
+  const seqs = spec.sequences || [];
+  const app = document.getElementById("app");
+
+  if(!seqs.length){
+    app.innerHTML = sidebarHtml(seqs) +
+      `<main class="main"><div class="seq-head"><h1 class="seq-title">시퀀스가 없습니다</h1>`
+      + `<p class="seq-desc">스펙에 <code>@FlowEntry</code> 진입점이 없어요. 노드 ${ (spec.nodes||[]).length }개는 로드됐습니다. `
+      + `진입점 메서드에 <code>@FlowEntry("tag")</code> 를 달고 다시 스캔하세요.</p></div></main>`;
+    wireUp();
+    return;
+  }
+
+  const seq = seqs[Math.min(state.seqIndex, seqs.length-1)];
+  const entryNode = state.nodesById[seq.entry];
+  const tree = buildTree(seq.entry);
+
+  const route = entryNode ? routeOf(entryNode) : null;
+  const routeHtml = route
+    ? `<div class="seq-route"><span class="verb">${esc(route.verb)}</span>`
+      + (route.path ? `<span class="pill">${esc(route.path)}</span>`:"")
+      + `<span class="pill">${esc(seq.tag)}</span></div>`
+    : `<div class="seq-route"><span class="pill">${esc(seq.tag)}</span></div>`;
+
+  const title = seq.title || seq.tag;
+  const desc = seq.description
+    || "진입점에서 시작해 요청이 어떤 함수를 거쳐 나가는지. 행을 누르면 파라미터·리턴·어노테이션·설명이 펼쳐집니다.";
+
+  const flowHtml = entryNode
+    ? `<div class="flow">${renderTreeNode(tree, true)}</div>`
+    : `<p class="seq-desc">진입 노드 <code>${esc(seq.entry)}</code> 를 스펙에서 찾지 못했습니다.</p>`;
+
+  app.innerHTML = sidebarHtml(seqs) +
+    `<main class="main">`
+    + `<div class="seq-head">${routeHtml}<h1 class="seq-title">${esc(title)}</h1>`
+    + `<p class="seq-desc">${esc(desc)}</p></div>`
+    + flowHtml
+    + `</main>`;
+  wireUp();
+}
+
+function sidebarHtml(seqs){
+  const spec = state.spec || {};
+  const src = spec.source || {};
+  const meta = [src.language, src.framework, src.collector].filter(Boolean).join(" · ");
+  const counts = `${(spec.nodes||[]).length} nodes · ${(spec.edges||[]).length} edges · `
+               + `${(spec.guards||[]).length} guards`;
+
+  const items = seqs.map((s,i) => {
+    const en = state.nodesById[s.entry];
+    const r = en ? routeOf(en) : null;
+    const sub = r ? `${r.verb}${r.path ? " "+r.path : ""}` : (en ? `${en.owner||""}.${en.simpleName||""}` : s.entry);
+    return `<button class="seq-item${i===state.seqIndex?" active":""}" data-seq="${i}">`
+         + `<div class="stag">${esc(s.tag)}</div><div class="sentry">${esc(sub)}</div></button>`;
+  }).join("");
+
+  return `<aside class="sidebar">`
+    + `<div class="wordmark"><span class="glyph">↳</span>FlowDoc<span class="tag">v${esc(spec.flowdoc||"?")}</span></div>`
+    + `<div><div class="sb-section-label">Spec</div>`
+    + `<div class="specbox"><div class="src-meta">${esc(meta||"unknown")}</div>`
+    + `<div class="counts">${esc(counts)}</div>`
+    + `<button id="loadbtn">다른 flowdoc.json 열기</button></div></div>`
+    + `<div><div class="sb-section-label">시퀀스 (${seqs.length})</div><div class="seq-list">${items||'<div class="specbox">없음</div>'}</div></div>`
+    + `<div><div class="sb-section-label">범례</div><div class="legend">`
+    + `<span class="chip"><span class="sw tx"></span>트랜잭션 경계</span>`
+    + `<span class="chip"><span class="sw sem"></span>세마포어 가드</span>`
+    + `<span class="chip"><span class="sw async"></span>비동기 후처리</span>`
+    + `<span class="chip"><span class="sw ext"></span>외부 호출</span>`
+    + `</div></div></aside>`;
+}
+
+function renderEmpty(){
+  const app = document.getElementById("app");
+  app.innerHTML =
+    `<div class="empty">`
+    + `<div class="glyph">↳</div><h1>FlowDoc</h1>`
+    + `<p>백엔드 내부 호출 흐름 뷰어. <code>flowdoc.json</code> 스펙을 불러오세요.</p>`
+    + `<div class="dropzone" id="dz"><b>flowdoc.json</b> 을 여기로 끌어다 놓거나<br>클릭해서 파일 선택</div>`
+    + `<div class="hint">스캐너로 스펙 생성:<br>`
+    + `<span class="c">cd flowdoc-java</span><br>`
+    + `<span class="c">./gradlew :flowdoc-scanner:run \\<br>&nbsp;&nbsp;--args="/경로/src/main/java /경로/flowdoc.json"</span><br><br>`
+    + `또는 같은 폴더에 <span class="c">flowdoc.json</span> 을 두고 <span class="c">python3 -m http.server</span> 로 열기</div>`
+    + `</div>`;
+  const dz = document.getElementById("dz");
+  dz.addEventListener("click", () => document.getElementById("filein").click());
+}
+
+/* ---------------- events ---------------- */
+
+function wireUp(){
+  document.querySelectorAll(".node-head").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const node = btn.closest(".node");
+      const open = node.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+  });
+  document.querySelectorAll(".seq-item").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.seqIndex = parseInt(btn.dataset.seq, 10);
+      render();
+    });
+  });
+  const lb = document.getElementById("loadbtn");
+  if(lb) lb.addEventListener("click", () => document.getElementById("filein").click());
+}
+
+document.getElementById("filein").addEventListener("change", e => {
+  if(e.target.files[0]) loadFromFile(e.target.files[0]);
+});
+
+// global drag & drop
+window.addEventListener("dragover", e => { e.preventDefault();
+  const dz = document.getElementById("dz"); if(dz) dz.classList.add("drag"); });
+window.addEventListener("dragleave", () => {
+  const dz = document.getElementById("dz"); if(dz) dz.classList.remove("drag"); });
+window.addEventListener("drop", e => {
+  e.preventDefault();
+  const dz = document.getElementById("dz"); if(dz) dz.classList.remove("drag");
+  if(e.dataTransfer.files[0]) loadFromFile(e.dataTransfer.files[0]);
+});
+
+tryAutoLoad();
+</script>
+</body>
+</html>
