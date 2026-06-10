@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowdoc.io/spec/flowdoc-0.1.schema.json",
+  "title": "FlowDoc shared spec",
+  "description": "Language-neutral description of internal call flows. Single source of truth produced by collectors (static scanner, runtime agent) and consumed by the FlowDoc UI. See docs/flowdoc-기획안.md §8.",
+  "type": "object",
+  "required": ["flowdoc", "source", "nodes", "edges"],
+  "properties": {
+    "flowdoc": {
+      "type": "string",
+      "description": "Spec format version.",
+      "const": "0.1"
+    },
+    "source": {
+      "type": "object",
+      "required": ["language", "collector"],
+      "properties": {
+        "language": { "type": "string", "examples": ["java", "python"] },
+        "framework": { "type": "string", "examples": ["spring-boot"] },
+        "collector": { "type": "string", "enum": ["static", "runtime"] }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "guards": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/guard" }
+    },
+    "sequences": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sequence" }
+    },
+    "traces": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/trace" }
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable identity, e.g. com.shop.OrderService#createOrder(CreateOrderCommand)."
+        },
+        "simpleName": { "type": "string" },
+        "owner": { "type": "string", "description": "Declaring type's simple name." },
+        "kind": { "type": "string", "examples": ["method"] },
+        "location": {
+          "type": "object",
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": "integer" },
+            "module": { "type": ["string", "null"] }
+          }
+        },
+        "auto": {
+          "type": "object",
+          "description": "Extracted automatically from code structure.",
+          "properties": {
+            "params": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "type": { "type": "string" }
+                }
+              }
+            },
+            "returns": {
+              "type": ["object", "null"],
+              "properties": { "type": { "type": "string" } }
+            },
+            "annotations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "attributes": { "type": "object", "additionalProperties": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "declared": {
+          "type": ["object", "null"],
+          "description": "Authored by the developer (annotations / Javadoc).",
+          "properties": {
+            "description": { "type": "string" },
+            "paramDocs": { "type": "object", "additionalProperties": { "type": "string" } }
+          }
+        },
+        "markers": {
+          "type": ["object", "null"],
+          "properties": {
+            "transaction": {
+              "type": "object",
+              "properties": {
+                "boundary": { "type": "string", "enum": ["open"] },
+                "propagation": { "type": ["string", "null"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to", "callType", "resolution"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "callType": { "type": "string", "enum": ["sync", "async", "event"] },
+        "site": {
+          "type": "object",
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": "integer" }
+          }
+        },
+        "condition": { "type": ["string", "null"] },
+        "resolution": {
+          "type": "string",
+          "enum": ["concrete", "single-impl", "ambiguous", "runtime-confirmed"]
+        }
+      }
+    },
+    "guard": {
+      "type": "object",
+      "required": ["nodeId", "type", "resource"],
+      "properties": {
+        "nodeId": { "type": "string" },
+        "type": { "type": "string", "enum": ["semaphore", "lock"] },
+        "resource": { "type": "string" },
+        "permits": { "type": "integer" },
+        "source": { "type": "string", "enum": ["declared", "auto"] }
+      }
+    },
+    "sequence": {
+      "type": "object",
+      "required": ["tag", "entry"],
+      "properties": {
+        "tag": { "type": "string" },
+        "title": { "type": ["string", "null"] },
+        "entry": { "type": "string" },
+        "description": { "type": ["string", "null"] },
+        "transactions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "owner": { "type": "string" },
+              "covers": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "required": ["traceId", "sequenceTag", "spans"],
+      "properties": {
+        "traceId": { "type": "string" },
+        "sequenceTag": { "type": "string" },
+        "spans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "nodeId": { "type": "string" },
+              "parent": { "type": ["string", "null"] },
+              "tEnter": { "type": ["integer", "null"] },
+              "tExit": { "type": ["integer", "null"] },
+              "thread": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}
