@@ -61,6 +61,8 @@ class FlowScannerTest {
         Sequence seq = spec.sequences().get(0);
         assertEquals("place-order", seq.tag());
         assertEquals("com.shop.OrderController#placeOrder(PlaceOrderRequest)", seq.entry());
+        assertEquals("declared", seq.source());
+        assertEquals("http", seq.trigger().kind()); // from @PostMapping
 
         // Node for the entry, with the standard annotation captured as auto
         Node entry = node(spec, "com.shop.OrderController#placeOrder(PlaceOrderRequest)");
@@ -83,6 +85,55 @@ class FlowScannerTest {
         // Internal edge controller -> service resolved and kept
         assertTrue(spec.edges().stream().anyMatch(this::isControllerToService),
                 "expected resolved edge placeOrder -> createOrder");
+    }
+
+    @Test
+    void autoDetectsStandardTriggersAsEntryPoints() throws IOException {
+        write("com/shop/JobRunner.java", """
+                package com.shop;
+
+                public class JobRunner {
+                    @Scheduled(cron = "0 0 * * * *")
+                    public void cleanup() {
+                        purge();
+                    }
+
+                    public void purge() {
+                    }
+                }
+                """);
+        write("com/shop/PingController.java", """
+                package com.shop;
+
+                public class PingController {
+                    @GetMapping("/ping")
+                    public String ping() {
+                        return "pong";
+                    }
+                }
+                """);
+
+        FlowDocSpec spec = new FlowScanner().scan(sourceRoot);
+
+        // Both trigger methods become entry points with no @FlowEntry, marked source=auto.
+        assertEquals(2, spec.sequences().size());
+        assertTrue(spec.sequences().stream().allMatch(s -> s.source().equals("auto")),
+                "trigger-detected sequences should be source=auto");
+        assertTrue(spec.sequences().stream().anyMatch(s -> s.entry().equals("com.shop.JobRunner#cleanup()")),
+                "expected @Scheduled cleanup() as an auto entry");
+        assertTrue(spec.sequences().stream().anyMatch(s -> s.entry().equals("com.shop.PingController#ping()")),
+                "expected @GetMapping ping() as an auto entry");
+
+        // Triggers are normalized to language-neutral kinds, not Spring annotation names.
+        Sequence sched = spec.sequences().stream()
+                .filter(s -> s.entry().equals("com.shop.JobRunner#cleanup()")).findFirst().orElseThrow();
+        assertEquals("scheduled", sched.trigger().kind());
+        assertEquals("Scheduled · 0 0 * * * *", sched.trigger().label());
+
+        Sequence ping = spec.sequences().stream()
+                .filter(s -> s.entry().equals("com.shop.PingController#ping()")).findFirst().orElseThrow();
+        assertEquals("http", ping.trigger().kind());
+        assertEquals("GET /ping", ping.trigger().label());
     }
 
     private boolean isControllerToService(Edge e) {

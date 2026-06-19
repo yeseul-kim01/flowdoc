@@ -204,6 +204,10 @@ function indexSpec(spec){
 
 function loadSpec(spec){
   indexSpec(spec);
+  // Default to the first author-declared (@FlowEntry) flow; fall back to the first overall.
+  const seqs = spec.sequences || [];
+  const firstDeclared = seqs.findIndex(s => s.source !== "auto");
+  state.seqIndex = firstDeclared >= 0 ? firstDeclared : 0;
   render();
 }
 
@@ -410,12 +414,19 @@ function render(){
   const entryNode = state.nodesById[seq.entry];
   const tree = buildTree(seq.entry);
 
-  const route = entryNode ? routeOf(entryNode) : null;
-  const routeHtml = route
-    ? `<div class="seq-route"><span class="verb">${esc(route.verb)}</span>`
-      + (route.path ? `<span class="pill">${esc(route.path)}</span>`:"")
-      + `<span class="pill">${esc(seq.tag)}</span></div>`
-    : `<div class="seq-route"><span class="pill">${esc(seq.tag)}</span></div>`;
+  // Header trigger badge from the language-neutral seq.trigger (kind drives display).
+  const trig = seq.trigger;
+  let routeInner = "";
+  if(trig){
+    if(trig.kind === "http"){
+      const verb = (trig.detail && trig.detail.verb) || "HTTP";
+      const path = (trig.detail && trig.detail.path) || "";
+      routeInner = `<span class="verb">${esc(verb)}</span>` + (path ? `<span class="pill">${esc(path)}</span>` : "");
+    } else {
+      routeInner = `<span class="verb">${esc(trig.kind)}</span><span class="pill">${esc(trig.label||"")}</span>`;
+    }
+  }
+  const routeHtml = `<div class="seq-route">${routeInner}<span class="pill">${esc(seq.tag)}</span></div>`;
 
   const title = seq.title || seq.tag;
   const desc = seq.description
@@ -441,13 +452,25 @@ function sidebarHtml(seqs){
   const counts = `${(spec.nodes||[]).length} nodes · ${(spec.edges||[]).length} edges · `
                + `${(spec.guards||[]).length} guards`;
 
-  const items = seqs.map((s,i) => {
+  const seqItem = (s,i) => {
     const en = state.nodesById[s.entry];
-    const r = en ? routeOf(en) : null;
-    const sub = r ? `${r.verb}${r.path ? " "+r.path : ""}` : (en ? `${en.owner||""}.${en.simpleName||""}` : s.entry);
+    // Neutral trigger label ("GET /x", "Scheduled · cron", "Kafka · topic"); never a framework name.
+    const sub = (s.trigger && s.trigger.label) || (en ? `${en.owner||""}.${en.simpleName||""}` : s.entry);
     return `<button class="seq-item${i===state.seqIndex?" active":""}" data-seq="${i}">`
          + `<div class="stag">${esc(s.tag)}</div><div class="sentry">${esc(sub)}</div></button>`;
-  }).join("");
+  };
+  // Preserve each sequence's ORIGINAL index (used by data-seq / state.seqIndex) when grouping.
+  const idx = seqs.map((s,i) => [s,i]);
+  const declared = idx.filter(([s]) => s.source !== "auto");
+  const autoSeqs = idx.filter(([s]) => s.source === "auto");
+  const listOf = arr => arr.map(([s,i]) => seqItem(s,i)).join("");
+  const seqSection = (declared.length && autoSeqs.length)
+    ? `<div class="sb-section-label">선언 @FlowEntry (${declared.length})</div>`
+      + `<div class="seq-list">${listOf(declared)}</div>`
+      + `<div class="sb-section-label" style="margin-top:16px">자동 감지 · 트리거 (${autoSeqs.length})</div>`
+      + `<div class="seq-list">${listOf(autoSeqs)}</div>`
+    : `<div class="sb-section-label">시퀀스 (${seqs.length})</div>`
+      + `<div class="seq-list">${listOf(idx)||'<div class="specbox">없음</div>'}</div>`;
 
   return `<aside class="sidebar">`
     + `<div class="wordmark"><span class="glyph">↳</span>FlowDoc<span class="tag">v${esc(spec.flowdoc||"?")}</span></div>`
@@ -455,7 +478,7 @@ function sidebarHtml(seqs){
     + `<div class="specbox"><div class="src-meta">${esc(meta||"unknown")}</div>`
     + `<div class="counts">${esc(counts)}</div>`
     + `<button id="loadbtn">다른 flowdoc.json 열기</button></div></div>`
-    + `<div><div class="sb-section-label">시퀀스 (${seqs.length})</div><div class="seq-list">${items||'<div class="specbox">없음</div>'}</div></div>`
+    + `<div>${seqSection}</div>`
     + `<div><div class="sb-section-label">범례</div><div class="legend">`
     + `<span class="chip"><span class="sw tx"></span>트랜잭션 경계</span>`
     + `<span class="chip"><span class="sw sem"></span>세마포어 가드</span>`
