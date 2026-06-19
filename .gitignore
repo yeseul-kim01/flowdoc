@@ -23,3 +23,8 @@ Thumbs.db
 
 # --- Scanner output written to the repo root during local runs ---
 /flowdoc.json
+
+
+#---claude---
+.claude/
+.claude/**
