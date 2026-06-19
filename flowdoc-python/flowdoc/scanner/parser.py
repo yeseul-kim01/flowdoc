@@ -87,10 +87,14 @@ def _decorator_to_info(dec: ast.expr) -> Optional[AnnotationInfo]:
         return AnnotationInfo(name=dec.attr)
     if isinstance(dec, ast.Call):
         # func part
+        receiver: str | None = None
         if isinstance(dec.func, ast.Name):
             name = dec.func.id
         elif isinstance(dec.func, ast.Attribute):
             name = dec.func.attr
+            # Store the receiver variable (e.g. "router" from router.post(...))
+            if isinstance(dec.func.value, ast.Name):
+                receiver = dec.func.value.id
         else:
             return None
         # collect keyword args as attributes
@@ -101,6 +105,9 @@ def _decorator_to_info(dec: ast.expr) -> Optional[AnnotationInfo]:
         # positional args → "value" key (FastAPI path string)
         if dec.args:
             attrs["value"] = ast.unparse(dec.args[0])
+        # Store receiver for prefix resolution in builder
+        if receiver:
+            attrs["__receiver__"] = receiver
         return AnnotationInfo(name=name, attributes=attrs)
     return None
 
@@ -138,6 +145,8 @@ class _FileVisitor(ast.NodeVisitor):
         self._import_aliases: dict[str, str] = {}
         # from X import Y → {Y: X.Y}
         self._from_imports: dict[str, str] = {}
+        # variable_name → prefix string from APIRouter(prefix=...)
+        self.router_prefixes: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Import tracking (for resolution hints — stored but used by resolver)
@@ -154,6 +163,38 @@ class _FileVisitor(ast.NodeVisitor):
         for alias in node.names:
             key = alias.asname or alias.name
             self._from_imports[key] = f"{module}.{alias.name}" if module else alias.name
+        self.generic_visit(node)
+
+    # ------------------------------------------------------------------
+    # Module-level assignment: capture APIRouter(prefix=...) bindings
+    # ------------------------------------------------------------------
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        """Capture `router = APIRouter(prefix="/foo")` at module level."""
+        if self._func_stack or self._class_stack:
+            self.generic_visit(node)
+            return
+        if not (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+            self.generic_visit(node)
+            return
+        var_name = node.targets[0].id
+        call = node.value
+        if not isinstance(call, ast.Call):
+            self.generic_visit(node)
+            return
+        # Match APIRouter(...) or fastapi.APIRouter(...)
+        func_name = ""
+        if isinstance(call.func, ast.Name):
+            func_name = call.func.id
+        elif isinstance(call.func, ast.Attribute):
+            func_name = call.func.attr
+        if func_name != "APIRouter":
+            self.generic_visit(node)
+            return
+        for kw in call.keywords:
+            if kw.arg == "prefix" and isinstance(kw.value, ast.Constant):
+                self.router_prefixes[var_name] = str(kw.value.value)
+                break
         self.generic_visit(node)
 
     # ------------------------------------------------------------------
@@ -298,6 +339,7 @@ class ParsedFile:
     call_sites: list[CallSite]
     import_aliases: dict[str, str]   # alias → full module path
     from_imports: dict[str, str]     # name → module.name
+    router_prefixes: dict[str, str]  # var_name → prefix string from APIRouter(prefix=...)
 
 
 def parse_file(file: Path, root: Path) -> Optional[ParsedFile]:
@@ -342,4 +384,5 @@ def parse_file(file: Path, root: Path) -> Optional[ParsedFile]:
         call_sites=visitor.call_sites,
         import_aliases=visitor._import_aliases,
         from_imports=visitor._from_imports,
+        router_prefixes=visitor.router_prefixes,
     )
