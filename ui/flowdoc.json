@@ -90,6 +90,28 @@
       "annotations" : [ ]
     }
   }, {
+    "id" : "com.example.coupon.service.CouponService#remaining(Long)",
+    "simpleName" : "remaining",
+    "owner" : "CouponService",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/example/coupon/service/CouponService.java",
+      "line" : 61
+    },
+    "auto" : {
+      "params" : [ {
+        "name" : "campaignId",
+        "type" : "Long"
+      } ],
+      "returns" : {
+        "type" : "int"
+      },
+      "annotations" : [ ]
+    },
+    "declared" : {
+      "description" : "캠페인의 현재 남은 재고 수량 (조회 전용)."
+    }
+  }, {
     "id" : "com.example.coupon.domain.Coupon#getCode()",
     "simpleName" : "getCode",
     "owner" : "Coupon",
@@ -112,7 +134,7 @@
     "kind" : "method",
     "location" : {
       "file" : "com/example/coupon/api/CouponController.java",
-      "line" : 26
+      "line" : 27
     },
     "auto" : {
       "params" : [ {
@@ -151,18 +173,76 @@
       }
     }
   }, {
+    "id" : "com.example.coupon.api.CouponController#remaining(Long)",
+    "simpleName" : "remaining",
+    "owner" : "CouponController",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/example/coupon/api/CouponController.java",
+      "line" : 40
+    },
+    "auto" : {
+      "params" : [ {
+        "name" : "campaignId",
+        "type" : "Long"
+      } ],
+      "returns" : {
+        "type" : "int"
+      },
+      "annotations" : [ {
+        "name" : "GetMapping",
+        "attributes" : {
+          "value" : "\"/{campaignId}/remaining\""
+        }
+      } ]
+    }
+  }, {
     "id" : "com.example.coupon.CouponRushApplication#main(String[])",
     "simpleName" : "main",
     "owner" : "CouponRushApplication",
     "kind" : "method",
     "location" : {
       "file" : "com/example/coupon/CouponRushApplication.java",
-      "line" : 12
+      "line" : 14
     },
     "auto" : {
       "params" : [ {
         "name" : "args",
         "type" : "String[]"
+      } ],
+      "annotations" : [ ]
+    }
+  }, {
+    "id" : "com.example.coupon.maintenance.CouponMaintenance#reportStock()",
+    "simpleName" : "reportStock",
+    "owner" : "CouponMaintenance",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
+      "line" : 20
+    },
+    "auto" : {
+      "params" : [ ],
+      "annotations" : [ {
+        "name" : "Scheduled",
+        "attributes" : {
+          "cron" : "\"0 0 3 * * *\""
+        }
+      } ]
+    }
+  }, {
+    "id" : "com.example.coupon.maintenance.CouponMaintenance#log(long)",
+    "simpleName" : "log",
+    "owner" : "CouponMaintenance",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
+      "line" : 26
+    },
+    "auto" : {
+      "params" : [ {
+        "name" : "campaigns",
+        "type" : "long"
       } ],
       "annotations" : [ ]
     }
@@ -303,6 +383,22 @@
         "attributes" : { }
       } ]
     }
+  }, {
+    "id" : "com.example.coupon.repository.CampaignRepository#count()",
+    "simpleName" : "count",
+    "owner" : "CampaignRepository",
+    "kind" : "external",
+    "location" : {
+      "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
+      "line" : 22
+    },
+    "auto" : {
+      "params" : [ ],
+      "annotations" : [ {
+        "name" : "Repository",
+        "attributes" : { }
+      } ]
+    }
   } ],
   "edges" : [ {
     "from" : "com.example.coupon.service.CouponService#issue(Long,Long)",
@@ -377,12 +473,48 @@
     },
     "resolution" : "concrete"
   }, {
+    "from" : "com.example.coupon.service.CouponService#remaining(Long)",
+    "to" : "com.example.coupon.repository.CampaignRepository#findById()",
+    "callType" : "sync",
+    "site" : {
+      "file" : "com/example/coupon/service/CouponService.java",
+      "line" : 62
+    },
+    "resolution" : "concrete"
+  }, {
     "from" : "com.example.coupon.api.CouponController#issue(Long,IssueRequest)",
     "to" : "com.example.coupon.service.CouponService#issue(Long,Long)",
     "callType" : "sync",
     "site" : {
       "file" : "com/example/coupon/api/CouponController.java",
-      "line" : 35
+      "line" : 36
+    },
+    "resolution" : "concrete"
+  }, {
+    "from" : "com.example.coupon.api.CouponController#remaining(Long)",
+    "to" : "com.example.coupon.service.CouponService#remaining(Long)",
+    "callType" : "sync",
+    "site" : {
+      "file" : "com/example/coupon/api/CouponController.java",
+      "line" : 42
+    },
+    "resolution" : "concrete"
+  }, {
+    "from" : "com.example.coupon.maintenance.CouponMaintenance#reportStock()",
+    "to" : "com.example.coupon.repository.CampaignRepository#count()",
+    "callType" : "sync",
+    "site" : {
+      "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
+      "line" : 22
+    },
+    "resolution" : "concrete"
+  }, {
+    "from" : "com.example.coupon.maintenance.CouponMaintenance#reportStock()",
+    "to" : "com.example.coupon.maintenance.CouponMaintenance#log(long)",
+    "callType" : "sync",
+    "site" : {
+      "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
+      "line" : 23
     },
     "resolution" : "concrete"
   }, {
@@ -413,7 +545,43 @@
   } ],
   "sequences" : [ {
     "tag" : "issue-coupon",
+    "title" : "선착순 쿠폰 발급 진입점. 요청을 받아 발급 트랜잭션을 시작한다.",
     "entry" : "com.example.coupon.api.CouponController#issue(Long,IssueRequest)",
+    "description" : "선착순 쿠폰 발급 진입점. 요청을 받아 발급 트랜잭션을 시작한다.",
+    "source" : "declared",
+    "trigger" : {
+      "kind" : "http",
+      "label" : "POST /{campaignId}/coupons",
+      "detail" : {
+        "verb" : "POST",
+        "path" : "/{campaignId}/coupons"
+      }
+    },
+    "transactions" : [ ]
+  }, {
+    "tag" : "CouponController.remaining",
+    "entry" : "com.example.coupon.api.CouponController#remaining(Long)",
+    "source" : "auto",
+    "trigger" : {
+      "kind" : "http",
+      "label" : "GET /{campaignId}/remaining",
+      "detail" : {
+        "verb" : "GET",
+        "path" : "/{campaignId}/remaining"
+      }
+    },
+    "transactions" : [ ]
+  }, {
+    "tag" : "CouponMaintenance.reportStock",
+    "entry" : "com.example.coupon.maintenance.CouponMaintenance#reportStock()",
+    "source" : "auto",
+    "trigger" : {
+      "kind" : "scheduled",
+      "label" : "Scheduled · 0 0 3 * * *",
+      "detail" : {
+        "cron" : "0 0 3 * * *"
+      }
+    },
     "transactions" : [ ]
   } ],
   "traces" : [ ]

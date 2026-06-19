@@ -56,4 +56,11 @@ public class CouponService {
     private void decrement(Campaign campaign) {
         campaign.decrementRemaining();
     }
+
+    /** 캠페인의 현재 남은 재고 수량 (조회 전용). */
+    public int remaining(Long campaignId) {
+        return campaignRepository.findById(campaignId)
+                .map(Campaign::getRemaining)
+                .orElse(0);
+    }
 }
