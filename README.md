@@ -12,7 +12,7 @@ only the intent a static parser cannot know is declared with small annotations.
 
 Java / Spring Boot first, **Python planned** — both emit the same language-neutral spec.
 
-📄 Full design: [docs/flowdoc-기획안.md](docs/flowdoc-기획안.md)
+📖 사용법: [docs/usage.md](docs/usage.md) · 📄 Full design: [docs/flowdoc-기획안.md](docs/flowdoc-기획안.md)
 
 ---
 
@@ -41,14 +41,18 @@ flowdoc-java/             # Gradle multi-module JVM implementation
   flowdoc-annotations/      # @FlowEntry, @Guarded, … that user code imports
   flowdoc-core/             # spec model (records) + JSON (de)serialization
   flowdoc-scanner/          # static scanner: JavaParser + SymbolSolver → spec
+  flowdoc-spring-boot-starter/  # serves the viewer + spec live at /flowdoc (Swagger-style)
 flowdoc-python/           # (later) ast-based scanner emitting the same spec
-examples/sample-shop/     # demo source + a generated flowdoc.json
+examples/sample-shop/     # minimal self-contained demo (stand-in annotations)
+examples/coupon-rush/     # real Spring Boot app: scan → flowdoc.json → live /flowdoc
 poc/                      # original UI prototype
 docs/                     # design docs
 ```
 
-Later milestones add `flowdoc-agent` (runtime AOP), `flowdoc-gradle-plugin` /
-`flowdoc-maven-plugin`, and `flowdoc-spring-boot-starter` — see the roadmap.
+`flowdoc-spring-boot-starter` already serves the viewer + a prebuilt spec live at
+`/flowdoc` (add the dependency, scan into resources, done). Later milestones add
+`flowdoc-agent` (runtime AOP) and `flowdoc-gradle-plugin` / `flowdoc-maven-plugin` to
+generate the spec automatically at build time — see the roadmap.
 
 ## Quickstart
 
@@ -65,10 +69,19 @@ cd flowdoc-java
   --args="$(pwd)/../examples/sample-shop/src/main/java $(pwd)/../examples/sample-shop/flowdoc.json"
 ```
 
-The scanner emits one node per method, one edge per **resolvable internal call**
-(unresolved/external calls are dropped, never guessed), plus `@FlowEntry` sequences,
-`@Guarded` guards, and `@Transactional` markers. See the result in
-[examples/sample-shop/flowdoc.json](examples/sample-shop/flowdoc.json).
+The scanner emits one node per method and one edge per call it can place: internal calls
+resolve to scanned methods, and calls into a `@Repository` / Spring Data repository (or a
+`@FlowExternal` type) are drawn as **boundary nodes** — only genuinely unknown targets are
+dropped, never guessed. It also captures `@FlowEntry` sequences, `@Guarded` guards,
+`@Transactional` markers, async edges (`@Async`), and per-node descriptions (Javadoc or
+`@FlowDoc`).
+
+For a **real Spring Boot app** wired end-to-end — scan → spec → live viewer at `/flowdoc` —
+see [examples/coupon-rush](examples/coupon-rush/):
+
+```bash
+cd ../examples/coupon-rush && ./gradlew bootRun   # open http://localhost:8080/flowdoc
+```
 
 ## Annotations (what you declare)
 
@@ -87,13 +100,15 @@ Standard annotations (`@Transactional`, `@PostMapping`, `@Async`, `@Repository`,
 
 | Milestone | Scope |
 |---|---|
-| **v0.1** | JSON spec + static core (nodes/edges/`auto` + `@FlowEntry`/`@Transactional`/`@Guarded`), UI structure view |
-| **v0.2** | Javadoc → docs, single-impl interface resolution, `@FlowExternal`/`@FlowIgnore`/`@FlowResolves`, Gradle/Maven plugins |
+| **v0.1** ✅ | JSON spec + static core (nodes/edges/`auto` + `@FlowEntry`/`@Transactional`/`@Guarded`), UI structure view |
+| **v0.2** 🔄 | Javadoc → docs ✅, `@FlowExternal`/repository boundary nodes ✅, async edges ✅, live `/flowdoc` starter ✅ · _remaining:_ full single-impl/`@FlowResolves`, `@FlowIgnore`, Gradle/Maven plugins, accessor-noise filtering |
 | **v0.3** | Runtime overlay (Spring AOP + `TransactionSynchronization`), UI trace view |
 | **v0.4** | Event publish ↔ handler linking, ambiguity resolution, multi-module boundaries |
-| **v1.0** | Stabilization, packaging, live `/flowdoc` endpoint, Python collector |
+| **v1.0** | Stabilization, packaging, Python collector |
 
-Currently at **v0.1**: spec model + a working static scanner.
+Currently mid **v0.2**: the static scanner resolves internal + repository/external calls,
+async, guards, transactions, and descriptions; the `flowdoc-spring-boot-starter` serves the
+viewer live at `/flowdoc`.
 
 ## License
 

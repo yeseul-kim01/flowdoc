@@ -192,6 +192,25 @@ flowdoc:
       "markers": {
         "transaction": { "boundary": "open", "propagation": "REQUIRED" }
       }
+    },
+    {
+      "id": "com.shop.order.OrderRepository#save()",
+      "simpleName": "save",
+      "owner": "OrderRepository",
+      "kind": "external",
+      "location": { "file": "OrderService.java", "line": 95 },
+      "auto": { "params": [], "annotations": [{ "name": "Repository" }] }
+    },
+    {
+      "id": "com.shop.notify.NotificationService#notifyPlaced(Order)",
+      "simpleName": "notifyPlaced",
+      "owner": "NotificationService",
+      "kind": "method",
+      "location": { "file": "NotificationService.java", "line": 20 },
+      "auto": {
+        "params": [{ "name": "order", "type": "Order" }],
+        "annotations": [{ "name": "Async" }]
+      }
     }
   ],
 
@@ -201,6 +220,22 @@ flowdoc:
       "to": "com.shop.order.OrderService#createOrder(CreateOrderCommand)",
       "callType": "sync",
       "site": { "file": "OrderController.java", "line": 50 },
+      "condition": null,
+      "resolution": "concrete"
+    },
+    {
+      "from": "com.shop.order.OrderService#createOrder(CreateOrderCommand)",
+      "to": "com.shop.order.OrderRepository#save()",
+      "callType": "sync",
+      "site": { "file": "OrderService.java", "line": 95 },
+      "condition": null,
+      "resolution": "concrete"
+    },
+    {
+      "from": "com.shop.order.OrderService#createOrder(CreateOrderCommand)",
+      "to": "com.shop.notify.NotificationService#notifyPlaced(Order)",
+      "callType": "async",
+      "site": { "file": "OrderService.java", "line": 98 },
       "condition": null,
       "resolution": "concrete"
     }
@@ -246,6 +281,8 @@ flowdoc:
 ```
 
 `edges[].resolution` 값: `concrete`(구체 타입 호출), `single-impl`(인터페이스인데 구현 1개라 자동 매핑), `ambiguous`(구현 다수, 명시 필요), `runtime-confirmed`(트레이스가 확정). UI는 이 신뢰도를 시각적으로 구분한다.
+
+`edges[].callType` 값: `sync`(직접 호출), `async`(`@Async` 등 커밋 후 별도 스레드 — tx 레일 밖에 배치), `event`(이벤트 디커플링, 점선). `nodes[].kind`는 보통 `method`지만, `@Repository`·Spring Data 저장소나 `@FlowExternal` 대상처럼 소스에 정의가 없는 경계는 `kind: "external"` 노드로 그린다(상속 시그니처를 날조하지 않고 경계만 표시, 내부로 더 파고들지 않음). 위 예시의 `OrderRepository#save()`가 이 경우다.
 
 ---
 
@@ -309,11 +346,15 @@ flowdoc:
 
 ## 14. 로드맵
 
-**v0.1 — 스펙 + 정적 코어**
+**v0.1 — 스펙 + 정적 코어** ✅
 JSON 스펙 스키마 확정. JavaParser 기반 스캐너로 노드/간선/`auto` 필드 + `@FlowEntry`·`@Transactional`·`@Guarded` 읽기. FlowDoc UI 구조 뷰(프로토타입을 실제 스펙 소비로 연결).
 
-**v0.2 — 정적 완성도**
-Javadoc → 설명, 인터페이스 단일 구현 자동 해석, `@FlowExternal`·`@FlowIgnore`·`@FlowResolves`, Gradle/Maven 플러그인으로 빌드 타임 생성.
+**v0.2 — 정적 완성도** 🔄 _(진행 중)_
+- ✅ Javadoc → 설명 + `@FlowDoc(summary, params)` 명시 설명
+- ✅ `@Repository`/Spring Data·`@FlowExternal` 호출을 외부 경계 노드로 표현, async 간선(`@Async`), 간선 중복 제거
+- ✅ 수신자 타입 폴백 해석(인자 해석 실패 시에도 내부 호출 복구)
+- ✅ 라이브 `/flowdoc` 스타터(`flowdoc-spring-boot-starter`) — 원래 v1.0 계획이었으나 조기 구현
+- ⬜ 인터페이스 단일 구현 완전 해석 + `@FlowResolves`, `@FlowIgnore`, Gradle/Maven 빌드 플러그인, getter 등 노이즈 필터링
 
 **v0.3 — 런타임 오버레이**
 Spring AOP 에이전트 + `TransactionSynchronization`으로 트레이스 수집. UI 트레이스 뷰. 명시한 의도의 사후 검증.
@@ -322,7 +363,7 @@ Spring AOP 에이전트 + `TransactionSynchronization`으로 트레이스 수집
 이벤트 발행↔핸들러 연결, 모호성 해소, 멀티모듈 경계.
 
 **v1.0 — 안정화 + 확장**
-문서·패키징·라이브 엔드포인트 정리. Python 수집기(별도 트랙)로 같은 스펙 산출.
+문서·패키징 정리. Python 수집기(별도 트랙)로 같은 스펙 산출. (라이브 엔드포인트는 v0.2에서 선행.)
 
 ---
 
