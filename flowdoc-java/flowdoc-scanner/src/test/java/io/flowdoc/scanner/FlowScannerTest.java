@@ -136,6 +136,40 @@ class FlowScannerTest {
         assertEquals("GET /ping", ping.trigger().label());
     }
 
+    @Test
+    void classifiesRepositoryReadVsWrite() throws IOException {
+        write("com/shop/Thing.java", "package com.shop; public class Thing {}");
+        write("com/shop/ThingRepository.java", """
+                package com.shop;
+                import org.springframework.data.jpa.repository.JpaRepository;
+                public interface ThingRepository extends JpaRepository<Thing, Long> {
+                }
+                """);
+        write("com/shop/ThingService.java", """
+                package com.shop;
+
+                public class ThingService {
+                    private final ThingRepository repo;
+
+                    ThingService(ThingRepository repo) {
+                        this.repo = repo;
+                    }
+
+                    public void doIt() {
+                        repo.findById(1L);
+                        repo.save(new Thing());
+                    }
+                }
+                """);
+
+        FlowDocSpec spec = new FlowScanner().scan(sourceRoot);
+
+        Node read = node(spec, "com.shop.ThingRepository#findById()");
+        assertEquals("read", read.markers().dataAccess());
+        Node write = node(spec, "com.shop.ThingRepository#save()");
+        assertEquals("write", write.markers().dataAccess());
+    }
+
     private boolean isControllerToService(Edge e) {
         return e.from().equals("com.shop.OrderController#placeOrder(PlaceOrderRequest)")
                 && e.to().equals("com.shop.OrderService#createOrder(PlaceOrderRequest)");
