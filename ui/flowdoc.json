@@ -219,7 +219,7 @@
     "kind" : "method",
     "location" : {
       "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
-      "line" : 20
+      "line" : 24
     },
     "auto" : {
       "params" : [ ],
@@ -237,7 +237,7 @@
     "kind" : "method",
     "location" : {
       "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
-      "line" : 26
+      "line" : 31
     },
     "auto" : {
       "params" : [ {
@@ -307,6 +307,33 @@
       "annotations" : [ ]
     }
   }, {
+    "id" : "com.example.coupon.repository.CouponRepository#deleteSoldOut()",
+    "simpleName" : "deleteSoldOut",
+    "owner" : "CouponRepository",
+    "kind" : "method",
+    "location" : {
+      "file" : "com/example/coupon/repository/CouponRepository.java",
+      "line" : 10
+    },
+    "auto" : {
+      "params" : [ ],
+      "returns" : {
+        "type" : "int"
+      },
+      "annotations" : [ {
+        "name" : "Modifying",
+        "attributes" : { }
+      }, {
+        "name" : "Query",
+        "attributes" : {
+          "value" : "\"delete from Coupon c where c.campaign.remaining = 0\""
+        }
+      } ]
+    },
+    "markers" : {
+      "dataAccess" : "write"
+    }
+  }, {
     "id" : "com.example.coupon.domain.Campaign#decrementRemaining()",
     "simpleName" : "decrementRemaining",
     "owner" : "Campaign",
@@ -366,6 +393,9 @@
         "name" : "Repository",
         "attributes" : { }
       } ]
+    },
+    "markers" : {
+      "dataAccess" : "write"
     }
   }, {
     "id" : "com.example.coupon.repository.CampaignRepository#findById()",
@@ -382,6 +412,9 @@
         "name" : "Repository",
         "attributes" : { }
       } ]
+    },
+    "markers" : {
+      "dataAccess" : "read"
     }
   }, {
     "id" : "com.example.coupon.repository.CampaignRepository#count()",
@@ -390,7 +423,7 @@
     "kind" : "external",
     "location" : {
       "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
-      "line" : 22
+      "line" : 26
     },
     "auto" : {
       "params" : [ ],
@@ -398,6 +431,9 @@
         "name" : "Repository",
         "attributes" : { }
       } ]
+    },
+    "markers" : {
+      "dataAccess" : "read"
     }
   } ],
   "edges" : [ {
@@ -505,7 +541,16 @@
     "callType" : "sync",
     "site" : {
       "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
-      "line" : 22
+      "line" : 26
+    },
+    "resolution" : "concrete"
+  }, {
+    "from" : "com.example.coupon.maintenance.CouponMaintenance#reportStock()",
+    "to" : "com.example.coupon.repository.CouponRepository#deleteSoldOut()",
+    "callType" : "sync",
+    "site" : {
+      "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
+      "line" : 27
     },
     "resolution" : "concrete"
   }, {
@@ -514,7 +559,7 @@
     "callType" : "sync",
     "site" : {
       "file" : "com/example/coupon/maintenance/CouponMaintenance.java",
-      "line" : 23
+      "line" : 28
     },
     "resolution" : "concrete"
   }, {
