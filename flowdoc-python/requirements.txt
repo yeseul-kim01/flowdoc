@@ -1,0 +1,10 @@
+# Runtime dependencies
+jsonschema==4.23.0
+referencing==0.35.1
+jsonschema-specifications==2023.12.1
+rpds-py==0.20.0
+attrs==24.2.0
+
+# Development / test
+pytest==8.2.2
+pytest-cov==5.0.0
