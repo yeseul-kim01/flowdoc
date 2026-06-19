@@ -143,13 +143,13 @@ flowdoc:
 
 ## 7. 아키텍처
 
-스펙 우선(spec-first) 설계다. 가운데에 언어 중립 JSON 스펙을 두고, 그 스펙을 *만드는* 수집기와 *읽는* UI를 분리한다. OpenAPI 스펙과 Swagger UI의 관계와 똑같다.
+스펙 우선(spec-first) 설계다. 가운데에 언어 중립 JSON 스펙을 두고, 그 스펙을 *만드는* 수집기와 *읽는* UI를 분리한다. OpenAPI 스펙과 Swagger UI의 관계와 똑같다. 수집기는 프레임워크별로 둔다 — 현재 **Spring Boot**와 **FastAPI**를 병렬로 개발하며 둘 다 같은 스펙을 산출한다. 분담·기능 패리티는 [collaboration.md](collaboration.md) 참고.
 
 ```
-[정적 스캐너] ─┐
-[런타임 에이전트] ─┼─→ [공유 스펙 (JSON)] ─→ [FlowDoc UI (HTML)]
-[Python 스캐너(추후)] ─┘        │                  구조 뷰 + 트레이스 뷰
-                                 단일 진실 원천
+[Spring Boot 스캐너]   ─┐
+[FastAPI 스캐너]        ─┼─→ [공유 스펙 (JSON)] ─→ [FlowDoc UI (HTML)]
+[런타임 에이전트(후속)] ─┘        │                  구조 뷰 + 트레이스 뷰
+                                  단일 진실 원천
 ```
 
 **정적 스캐너 (Java)** — JavaParser + JavaSymbolSolver로 소스를 파싱한다. 클래스/메서드를 노드로, 본문의 호출식을 간선으로 만들고, 파라미터·리턴·표준 어노테이션·Javadoc을 `auto`로, FlowDoc 어노테이션을 `declared`로 채운다. 진입점(`@FlowEntry`)에서 시작해 도달 가능한 노드만 따라가며 시퀀스를 구성한다. 빌드 타임에 동작하므로 런타임 부하가 0이다.
@@ -328,9 +328,11 @@ flowdoc:
 
 ---
 
-## 12. 다국어 확장 (Python)
+## 12. 다국어 확장 (Python / FastAPI)
 
 언어 중립 스펙 덕분에 Python 지원은 "스펙을 뱉는 새 수집기"만 만들면 된다. UI는 그대로 재사용. Python 정적 수집기는 `ast` 모듈로 함수·호출을 추출하고, 데코레이터(`@flow_entry`, `@guarded` 등)로 명시 정보를 받는다. 런타임 수집기는 `sys.setprofile`이나 데코레이터 래핑으로 트레이스를 만든다. 어노테이션 철학과 auto/declared 경계는 언어와 무관하게 동일하게 유지한다.
+
+이건 "추후"가 아니라 **지금 병렬로 진행하는 트랙**이다. 첫 구체 타깃은 **FastAPI** — Spring Boot 수집기와 동일한 기능을, 같은 스펙·같은 UI로 산출하는 것이 목표다. Spring 어노테이션 ↔ FastAPI 데코레이터의 기능 대응표와 분담은 [collaboration.md](collaboration.md)에 정리돼 있다.
 
 ---
 
@@ -363,7 +365,10 @@ Spring AOP 에이전트 + `TransactionSynchronization`으로 트레이스 수집
 이벤트 발행↔핸들러 연결, 모호성 해소, 멀티모듈 경계.
 
 **v1.0 — 안정화 + 확장**
-문서·패키징 정리. Python 수집기(별도 트랙)로 같은 스펙 산출. (라이브 엔드포인트는 v0.2에서 선행.)
+문서·패키징 정리. (라이브 엔드포인트는 v0.2에서 선행.)
+
+**병렬 트랙 — FastAPI 수집기**
+지금 진행. Spring 수집기와 기능 패리티를 맞춰 같은 스펙·같은 UI로 산출 (§12, [collaboration.md](collaboration.md)).
 
 ---
 

@@ -10,9 +10,10 @@ boundaries, concurrency guards, and async post-processing** as an interactive,
 Swagger-UI-like view. Anything that can be pulled from code is pulled automatically;
 only the intent a static parser cannot know is declared with small annotations.
 
-Java / Spring Boot first, **Python planned** — both emit the same language-neutral spec.
+Two collectors built in parallel — **Spring Boot** (kys) and **FastAPI** (jch) — emit the
+**same** language-neutral spec into the **same** UI. Same feature set, different frameworks.
 
-📖 사용법: [docs/usage.md](docs/usage.md) · 📄 Full design: [docs/flowdoc-기획안.md](docs/flowdoc-기획안.md)
+📖 사용법: [docs/usage.md](docs/usage.md) · 🤝 팀 분담: [docs/collaboration.md](docs/collaboration.md) · 📄 Full design: [docs/flowdoc-기획안.md](docs/flowdoc-기획안.md) · 💡 시각화 아이디어: [docs/ideas.md](docs/ideas.md)
 
 ---
 
@@ -22,10 +23,13 @@ A language-neutral JSON spec sits in the middle. Collectors *produce* it; the UI
 exactly like the OpenAPI-spec / Swagger-UI split.
 
 ```
-[Static scanner (Java)] ─┐
-[Runtime agent (Java)]   ─┼─→  [shared spec (JSON)]  ─→  [FlowDoc UI (HTML)]
-[Python scanner (later)] ─┘         single source of truth
+[Spring Boot scanner — kys] ─┐
+[FastAPI scanner — jch]      ─┼─→  [shared spec (JSON)]  ─→  [FlowDoc UI (HTML)]
+[Runtime agent (later)]      ─┘         single source of truth
 ```
+
+The spec is the **contract** between the two collectors; the UI is **shared** and
+language-neutral. Ownership and feature-parity mapping: [docs/collaboration.md](docs/collaboration.md).
 
 The guiding rule (design §5): **never make a human write what the parser can read; ask
 for declaration only where intent/identity/meaning is not statically knowable.** A call's
@@ -37,12 +41,12 @@ is declared.
 ```
 spec/                     # JSON Schema — the single source of truth, language-neutral
 ui/                       # shared HTML viewer (consumes the spec)
-flowdoc-java/             # Gradle multi-module JVM implementation
+flowdoc-java/             # Spring Boot collector — kys (Gradle multi-module)
   flowdoc-annotations/      # @FlowEntry, @Guarded, … that user code imports
   flowdoc-core/             # spec model (records) + JSON (de)serialization
   flowdoc-scanner/          # static scanner: JavaParser + SymbolSolver → spec
   flowdoc-spring-boot-starter/  # serves the viewer + spec live at /flowdoc (Swagger-style)
-flowdoc-python/           # (later) ast-based scanner emitting the same spec
+flowdoc-python/           # FastAPI collector — jch (ast-based, same spec, /flowdoc router)
 examples/sample-shop/     # minimal self-contained demo (stand-in annotations)
 examples/coupon-rush/     # real Spring Boot app: scan → flowdoc.json → live /flowdoc
 poc/                      # original UI prototype
@@ -104,11 +108,13 @@ Standard annotations (`@Transactional`, `@PostMapping`, `@Async`, `@Repository`,
 | **v0.2** 🔄 | Javadoc → docs ✅, `@FlowExternal`/repository boundary nodes ✅, async edges ✅, live `/flowdoc` starter ✅ · _remaining:_ full single-impl/`@FlowResolves`, `@FlowIgnore`, Gradle/Maven plugins, accessor-noise filtering |
 | **v0.3** | Runtime overlay (Spring AOP + `TransactionSynchronization`), UI trace view |
 | **v0.4** | Event publish ↔ handler linking, ambiguity resolution, multi-module boundaries |
-| **v1.0** | Stabilization, packaging, Python collector |
+| **v1.0** | Stabilization, packaging |
+| **parallel track** | **FastAPI collector** (jch) — same spec & UI, feature parity with the Spring side ([docs/collaboration.md](docs/collaboration.md)) |
 
-Currently mid **v0.2**: the static scanner resolves internal + repository/external calls,
-async, guards, transactions, and descriptions; the `flowdoc-spring-boot-starter` serves the
-viewer live at `/flowdoc`.
+Currently mid **v0.2** on the Spring side (kys): the static scanner resolves internal +
+repository/external calls, async, guards, transactions, and descriptions; the
+`flowdoc-spring-boot-starter` serves the viewer live at `/flowdoc`. The FastAPI collector
+(jch) starts in parallel against the same spec contract.
 
 ## License
 
