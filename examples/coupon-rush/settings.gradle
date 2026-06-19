@@ -1,0 +1,5 @@
+rootProject.name = 'coupon-rush'
+
+// Pull @FlowEntry / @Guarded straight from the sibling implementation, no publish step.
+// Gradle substitutes io.flowdoc:flowdoc-annotations with the included build's module.
+includeBuild('../../flowdoc-java')
