@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📄 협업 방식 · 패리티 워크플로우 먼저 읽기
+    url: https://github.com/yeseul-kim01/flowdoc/blob/main/docs/collaboration.md
+    about: 이슈 열기 전에 분담·패리티 정의·워크플로우를 확인하세요.

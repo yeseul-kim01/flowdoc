@@ -1,0 +1,82 @@
+name: 🔁 Parity (한쪽 구현 → 반대편 미러)
+description: 한쪽(Spring/FastAPI)에 기능을 얹었으니 반대편에도 같은 스펙·UI로 맞춰달라는 요청.
+title: "[parity] "
+labels: ["parity"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        한쪽 수집기에 기능을 구현하면 이 이슈를 열어 반대편이 미러하도록 한다.
+        **패리티의 정의 = 같은 스펙 출력 → 같은 UI 렌더.** (자세한 워크플로우: `docs/collaboration.md`)
+  - type: dropdown
+    id: source
+    attributes:
+      label: 어느 쪽에 구현됨 → 누가 미러
+      options:
+        - "Spring Boot (kys) 구현됨 → FastAPI (jch)가 미러"
+        - "FastAPI (jch) 구현됨 → Spring Boot (kys)가 미러"
+    validations:
+      required: true
+  - type: input
+    id: feature
+    attributes:
+      label: 기능 (Feature)
+      placeholder: "예: @Repository/Spring Data 호출을 외부 경계 노드로 표시"
+    validations:
+      required: true
+  - type: input
+    id: idea-ref
+    attributes:
+      label: 관련 ideas.md 항목 (있으면)
+      placeholder: "예: B1 트랜잭션 위험, A1 공통 유틸, A5 엔드포인트 카탈로그 …"
+  - type: input
+    id: pr
+    attributes:
+      label: 구현 PR / 커밋 링크
+    validations:
+      required: true
+  - type: textarea
+    id: spec-shape
+    attributes:
+      label: 산출되는 스펙 모양 (Resulting flowdoc.json output) — 패리티 기준
+      description: 이 기능이 flowdoc.json에 만들어내는 노드/엣지/필드. 반대편은 "같은 출력"을 목표로 한다.
+      placeholder: |
+        예)
+        - nodes[].kind = "external", auto.annotations 에 { "name": "Repository" }
+        - edges[].callType = "async" (해당 시)
+        - sequences[].title / description 채움
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: spec-change
+    attributes:
+      label: 스펙 스키마 변경 있었나? (shared contract!)
+      options:
+        - "아니오 — 기존 스키마로 표현됨"
+        - "예 — spec/flowdoc-0.1.schema.json 변경됨 (아래 대응 힌트에 링크)"
+    validations:
+      required: true
+  - type: textarea
+    id: mapping
+    attributes:
+      label: 프레임워크 대응 힌트 (반대편 구현 가이드)
+      description: collaboration.md 패리티 표 기준. 반대편 프레임워크에서 무엇을 인식해야 같은 출력이 나오나.
+      placeholder: |
+        예) Spring @Transactional  ↔  FastAPI `async with session.begin()` / 선언 @transactional
+  - type: textarea
+    id: verify
+    attributes:
+      label: 패리티 검증 방법
+      placeholder: |
+        - examples 예제에 적용 → flowdoc.json 생성 → spec 스키마로 검증
+        - 같은 ui/index.html 로 열어 동일 배지/레일/설명 확인
+  - type: checkboxes
+    id: dod
+    attributes:
+      label: 완료 기준 (Definition of Done)
+      options:
+        - label: 반대편 수집기가 같은 스펙 필드를 산출
+        - label: 예제 flowdoc.json 이 spec/flowdoc-0.1.schema.json 통과
+        - label: 같은 UI 에서 동일하게 렌더됨
+        - label: (스펙 변경 시) 양측 합의 + 양쪽 동시 반영 완료

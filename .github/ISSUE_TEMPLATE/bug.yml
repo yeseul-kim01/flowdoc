@@ -1,0 +1,37 @@
+name: 🐞 Bug
+description: 스캐너·스타터·UI 가 기대와 다르게 동작.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: 어디서
+      options:
+        - "Spring Boot 수집기 (flowdoc-java)"
+        - "FastAPI 수집기 (flowdoc-python)"
+        - "공유 UI (ui/)"
+        - "스펙/스키마 (spec/)"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 재현 방법
+      placeholder: |
+        1. 어떤 코드를 스캔
+        2. 실행한 명령
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: 기대 vs 실제
+    validations:
+      required: true
+  - type: textarea
+    id: spec-snippet
+    attributes:
+      label: 관련 flowdoc.json 일부 (있으면)
+      render: json
