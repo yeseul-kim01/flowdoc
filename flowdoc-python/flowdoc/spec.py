@@ -87,11 +87,26 @@ class Edge:
 
 
 @dataclass
+class Trigger:
+    """Language-neutral description of how a sequence is entered.
+
+    Collectors map their framework's annotations onto this; the UI renders
+    from kind/label only — never from framework annotation names directly.
+    """
+
+    kind: str  # "http" | "scheduled" | "messaging" | "event" | "websocket"
+    label: str | None = None
+    detail: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class Sequence:
-    """An entry-point tagged sequence (from @flow_entry)."""
+    """An entry-point tagged sequence (from @flow_entry or auto-detected route)."""
 
     tag: str
     entry: str  # node id of the entry point
+    source: str = "auto"  # "declared" (@flow_entry) | "auto" (framework annotation)
+    trigger: Trigger | None = None
     transactions: list[Any] = field(default_factory=list)
 
 

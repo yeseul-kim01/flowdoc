@@ -1,7 +1,7 @@
 """CLI entry point for the FlowDoc Python scanner.
 
 Usage:
-    python -m flowdoc.scanner <source_root> <output_path>
+    python -m flowdoc <source_root> <output_path>
 """
 
 from __future__ import annotations
@@ -13,6 +13,10 @@ import sys
 from pathlib import Path
 
 import jsonschema
+
+# TODO: PR #1 머지 후 삭제하고 루트 spec/flowdoc-0.1.schema.json 참조로 교체.
+#       현재는 feat/trigger-entry-detection 브랜치 스키마(source/trigger 포함)를 임시 복사 사용.
+_SCHEMA_PATH: Path = Path(__file__).parents[2] / "_schema" / "flowdoc-0.1.schema.json"
 
 from flowdoc.scanner.builder import build_spec
 from flowdoc.scanner.discovery import discover_python_files
@@ -37,42 +41,14 @@ logging.Logger.success = _success  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# JSON Schema for spec validation
-# ---------------------------------------------------------------------------
-_FLOWDOC_SCHEMA: dict = {
-    "type": "object",
-    "required": ["flowdoc", "source", "nodes", "edges", "sequences", "guards", "traces"],
-    "properties": {
-        "flowdoc": {"type": "string", "const": "0.1"},
-        "source": {
-            "type": "object",
-            "required": ["language", "framework", "collector"],
-            "properties": {
-                "language": {"type": "string"},
-                "framework": {"type": "string"},
-                "collector": {"type": "string"},
-            },
-        },
-        "nodes": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": ["id", "simpleName", "owner", "kind", "location", "auto"],
-            },
-        },
-        "edges": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": ["from", "to", "callType", "site", "resolution"],
-            },
-        },
-        "sequences": {"type": "array"},
-        "guards": {"type": "array"},
-        "traces": {"type": "array"},
-    },
-}
+def _load_schema() -> dict:
+    """Load the FlowDoc JSON Schema from the temporary schema file.
+
+    Raises:
+        FileNotFoundError: If the schema file is missing.
+        json.JSONDecodeError: If the schema file is malformed JSON.
+    """
+    return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -133,7 +109,12 @@ def run(source_root: Path, output_path: Path, *, verbose: bool = False) -> int:
     # ── Validate ───────────────────────────────────────────────────────
     spec_dict = spec_to_dict(spec)
     try:
-        jsonschema.validate(spec_dict, _FLOWDOC_SCHEMA)
+        schema = _load_schema()
+        jsonschema.validate(spec_dict, schema)
+    except FileNotFoundError:
+        logger.warning("Schema file not found at %s — skipping validation", _SCHEMA_PATH)
+    except json.JSONDecodeError as exc:
+        logger.warning("Schema file is malformed JSON — skipping validation: %s", exc)
     except jsonschema.ValidationError as exc:
         logger.warning("Spec validation warning: %s", exc.message)
 
@@ -151,7 +132,7 @@ def run(source_root: Path, output_path: Path, *, verbose: bool = False) -> int:
 def main() -> None:
     """Parse CLI arguments and run the scanner."""
     parser = argparse.ArgumentParser(
-        prog="python -m flowdoc.scanner",
+        prog="python -m flowdoc",
         description="FlowDoc Python static scanner — generates flowdoc.json from a FastAPI project.",
     )
     parser.add_argument(
