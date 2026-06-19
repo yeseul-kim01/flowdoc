@@ -1,0 +1,146 @@
+"""FlowDoc spec v0.1 dataclasses and JSON serialization."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field, asdict
+from typing import Any
+
+
+@dataclass
+class Param:
+    """A single function parameter."""
+
+    name: str
+    type: str  # type hint string or "_" if unannotated
+
+
+@dataclass
+class Returns:
+    """Function return type."""
+
+    type: str
+
+
+@dataclass
+class AnnotationAttr:
+    """Key-value attribute on an annotation."""
+
+    name: str
+    value: str
+
+
+@dataclass
+class NodeAnnotation:
+    """A decorator/annotation attached to a node."""
+
+    name: str
+    attributes: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class Auto:
+    """Auto-extracted metadata from source analysis."""
+
+    params: list[Param] = field(default_factory=list)
+    returns: Returns | None = None
+    annotations: list[NodeAnnotation] = field(default_factory=list)
+
+
+@dataclass
+class Declared:
+    """Manually declared metadata (e.g. docstring description)."""
+
+    description: str | None = None
+
+
+@dataclass
+class Location:
+    """Source location of a node."""
+
+    file: str
+    line: int
+
+
+@dataclass
+class Node:
+    """A function or method node in the call graph."""
+
+    id: str
+    simpleName: str
+    owner: str  # class name or module name
+    kind: str   # always "method" in MVP
+    location: Location
+    auto: Auto = field(default_factory=Auto)
+    declared: Declared | None = None
+
+
+@dataclass
+class Edge:
+    """A directed call edge between two nodes."""
+
+    from_id: str
+    to_id: str
+    callType: str  # always "sync" in MVP
+    site: Location
+    resolution: str  # "concrete" | "single-impl"
+
+
+@dataclass
+class Sequence:
+    """An entry-point tagged sequence (from @flow_entry)."""
+
+    tag: str
+    entry: str  # node id of the entry point
+    transactions: list[Any] = field(default_factory=list)
+
+
+@dataclass
+class Source:
+    """Describes the source language/framework/collector."""
+
+    language: str = "python"
+    framework: str = "fastapi"
+    collector: str = "static"
+
+
+@dataclass
+class Spec:
+    """Top-level FlowDoc specification."""
+
+    flowdoc: str = "0.1"
+    source: Source = field(default_factory=Source)
+    nodes: list[Node] = field(default_factory=list)
+    edges: list[Edge] = field(default_factory=list)
+    sequences: list[Sequence] = field(default_factory=list)
+    guards: list[Any] = field(default_factory=list)
+    traces: list[Any] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Serialization helpers
+# ---------------------------------------------------------------------------
+
+def _clean(obj: Any) -> Any:
+    """Recursively clean None values and rename 'from_id'/'to_id' for the wire format."""
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        for k, v in obj.items():
+            if v is None:
+                continue
+            wire_key = {"from_id": "from", "to_id": "to"}.get(k, k)
+            out[wire_key] = _clean(v)
+        return out
+    if isinstance(obj, list):
+        return [_clean(i) for i in obj]
+    return obj
+
+
+def spec_to_dict(spec: Spec) -> dict[str, Any]:
+    """Convert a Spec to a JSON-serializable dict matching the wire format."""
+    return _clean(asdict(spec))
+
+
+def spec_to_json(spec: Spec, indent: int = 2) -> str:
+    """Serialize a Spec to a JSON string."""
+    return json.dumps(spec_to_dict(spec), ensure_ascii=False, indent=indent)
