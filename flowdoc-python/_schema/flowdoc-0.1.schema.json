@@ -108,6 +108,11 @@
                 "boundary": { "type": "string", "enum": ["open"] },
                 "propagation": { "type": ["string", "null"] }
               }
+            },
+            "dataAccess": {
+              "type": "string",
+              "description": "For data-boundary nodes (repositories, …): whether the call reads or writes. A write reached outside a transaction is an atomicity smell.",
+              "enum": ["read", "write"]
             }
           }
         }

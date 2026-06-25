@@ -26,6 +26,16 @@ _FLOW_ENTRY_NAMES: frozenset[str] = frozenset({"flow_entry", "flowdoc.flow_entry
 _SELF_PARAMS: frozenset[str] = frozenset({"self", "cls"})
 
 
+# SQLAlchemy write/read method names for dataAccess detection
+_SQLA_WRITE_METHODS: frozenset[str] = frozenset({
+    "add", "add_all", "delete", "merge", "flush",
+    "bulk_save_objects", "bulk_update_mappings", "bulk_insert_mappings",
+})
+_SQLA_SESSION_TYPES: frozenset[str] = frozenset({
+    "AsyncSession", "Session", "scoped_session",
+})
+
+
 @dataclass
 class ParamInfo:
     name: str
@@ -55,6 +65,8 @@ class FunctionDef:
     description: Optional[str] = None
     # For local-variable type resolution: {var_name: type_str}
     local_types: dict[str, str] = field(default_factory=dict)
+    # SQLAlchemy access pattern detected in body
+    data_access: Optional[str] = None
 
 
 @dataclass
@@ -126,6 +138,49 @@ def _first_docstring(body: list[ast.stmt]) -> Optional[str]:
         return doc.split("\n")[0] if doc else None
     return None
 
+
+
+def _detect_data_access(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    local_types: dict[str, str],
+) -> Optional[str]:
+    """Detect SQLAlchemy read/write patterns in a function body.
+
+    Scans attribute calls. Returns "write" if any session write method found,
+    "read" if only read methods, None if no SQLAlchemy session calls detected.
+    """
+    session_vars: set[str] = {"session", "db", "async_session"}
+    for var, type_str in local_types.items():
+        if any(t in type_str for t in _SQLA_SESSION_TYPES):
+            session_vars.add(var)
+
+    has_write = False
+    has_read = False
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Call):
+            continue
+        func = child.func
+        if not isinstance(func, ast.Attribute):
+            continue
+        method = func.attr
+        receiver: Optional[str] = None
+        if isinstance(func.value, ast.Name):
+            receiver = func.value.id
+        if receiver in session_vars:
+            if method in _SQLA_WRITE_METHODS:
+                has_write = True
+            elif method in ("get", "scalars", "scalar", "scalar_one",
+                            "scalar_one_or_none", "fetchall", "fetchone", "first"):
+                has_read = True
+        # bulk_* are unambiguously SQLAlchemy regardless of receiver name
+        if method in ("bulk_save_objects", "bulk_update_mappings", "bulk_insert_mappings"):
+            has_write = True
+
+    if has_write:
+        return "write"
+    if has_read:
+        return "read"
+    return None
 
 # ---------------------------------------------------------------------------
 # Visitor
@@ -252,6 +307,8 @@ class _FileVisitor(ast.NodeVisitor):
             if p.type_hint != "_":
                 local_types[p.name] = p.type_hint
 
+        data_access = _detect_data_access(node, local_types)
+
         annotations: list[AnnotationInfo] = []
         for dec in node.decorator_list:
             info = _decorator_to_info(dec)
@@ -271,6 +328,7 @@ class _FileVisitor(ast.NodeVisitor):
             annotations=annotations,
             description=desc,
             local_types=local_types,
+            data_access=data_access,
         )
         self.definitions.append(func_def)
 

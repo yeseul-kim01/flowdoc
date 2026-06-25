@@ -54,6 +54,14 @@ class Declared:
     description: str | None = None
 
 
+
+@dataclass
+class Markers:
+    """Structural markers on a node (data access, transaction boundary, …)."""
+
+    transaction: dict | None = None
+    dataAccess: str | None = None  # "read" | "write"
+
 @dataclass
 class Location:
     """Source location of a node."""
@@ -73,6 +81,7 @@ class Node:
     location: Location
     auto: Auto = field(default_factory=Auto)
     declared: Declared | None = None
+    markers: Markers | None = None
 
 
 @dataclass
