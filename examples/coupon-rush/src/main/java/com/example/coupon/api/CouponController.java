@@ -6,6 +6,7 @@ import com.example.coupon.service.CouponService;
 import io.flowdoc.annotation.FlowDoc;
 import io.flowdoc.annotation.FlowEntry;
 import io.flowdoc.annotation.Param;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,5 +34,11 @@ public class CouponController {
     @FlowEntry("issue-coupon")
     public IssueResult issue(@PathVariable Long campaignId, @RequestBody IssueRequest request) {
         return couponService.issue(campaignId, request.userId());
+    }
+
+    // No @FlowEntry — FlowDoc auto-detects this @GetMapping as a trigger entry (source=auto).
+    @GetMapping("/{campaignId}/remaining")
+    public int remaining(@PathVariable Long campaignId) {
+        return couponService.remaining(campaignId);
     }
 }
