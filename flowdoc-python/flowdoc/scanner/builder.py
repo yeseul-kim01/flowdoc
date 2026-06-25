@@ -10,6 +10,7 @@ from flowdoc.scanner.resolver import ResolvedEdge
 from flowdoc.spec import (
     Auto,
     Declared,
+    Markers,
     Edge,
     Location,
     Node,
@@ -54,6 +55,7 @@ def _build_node(defn: FunctionDef, root: Path) -> Node:
     ]
     auto = Auto(params=params, returns=returns, annotations=annotations)
     declared = Declared(description=defn.description) if defn.description else None
+    markers = Markers(dataAccess=defn.data_access) if defn.data_access else None
 
     return Node(
         id=defn.node_id,
@@ -63,6 +65,7 @@ def _build_node(defn: FunctionDef, root: Path) -> Node:
         location=Location(file=_relative_path(defn.file, root), line=defn.line),
         auto=auto,
         declared=declared,
+        markers=markers,
     )
 
 

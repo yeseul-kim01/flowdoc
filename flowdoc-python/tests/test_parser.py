@@ -146,3 +146,91 @@ def test_parse_nonexistent_file_returns_none(tmp_path: Path) -> None:
     missing = tmp_path / "ghost.py"
     result = parse_file(missing, tmp_path)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# markers.dataAccess — SQLAlchemy write/read detection
+# ---------------------------------------------------------------------------
+
+def test_data_access_write_session_add(tmp_path: Path) -> None:
+    """session.add() → data_access='write'."""
+    src = """
+        from sqlalchemy.ext.asyncio import AsyncSession
+        async def create_user(user, session: AsyncSession):
+            session.add(user)
+            await session.commit()
+    """
+    f = _write_py(tmp_path, "repo.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = next(d for d in result.definitions if d.simple_name == "create_user")
+    assert defn.data_access == "write"
+
+
+def test_data_access_write_session_delete(tmp_path: Path) -> None:
+    """session.delete() → data_access='write'."""
+    src = """
+        async def remove_item(item, session):
+            session.delete(item)
+            await session.commit()
+    """
+    f = _write_py(tmp_path, "repo.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = next(d for d in result.definitions if d.simple_name == "remove_item")
+    assert defn.data_access == "write"
+
+
+def test_data_access_read_session_get(tmp_path: Path) -> None:
+    """session.get() → data_access='read'."""
+    src = """
+        from sqlalchemy.ext.asyncio import AsyncSession
+        async def get_user(user_id: int, session: AsyncSession):
+            return await session.get(User, user_id)
+    """
+    f = _write_py(tmp_path, "repo.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = next(d for d in result.definitions if d.simple_name == "get_user")
+    assert defn.data_access == "read"
+
+
+def test_data_access_write_overrides_read(tmp_path: Path) -> None:
+    """write takes priority: session.get + session.add → 'write'."""
+    src = """
+        async def upsert(obj, session):
+            existing = await session.get(type(obj), obj.id)
+            if not existing:
+                session.add(obj)
+    """
+    f = _write_py(tmp_path, "repo.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = next(d for d in result.definitions if d.simple_name == "upsert")
+    assert defn.data_access == "write"
+
+
+def test_data_access_none_for_non_db_function(tmp_path: Path) -> None:
+    """No SQLAlchemy calls → data_access is None."""
+    src = """
+        def add_numbers(a: int, b: int) -> int:
+            return a + b
+    """
+    f = _write_py(tmp_path, "utils.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.data_access is None
+
+
+def test_data_access_bulk_write(tmp_path: Path) -> None:
+    """bulk_save_objects → 'write' regardless of receiver name."""
+    src = """
+        async def bulk_create(objs, db):
+            db.bulk_save_objects(objs)
+    """
+    f = _write_py(tmp_path, "repo.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.data_access == "write"
