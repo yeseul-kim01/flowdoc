@@ -14,9 +14,7 @@ from pathlib import Path
 
 import jsonschema
 
-# TODO: PR #1 머지 후 삭제하고 루트 spec/flowdoc-0.1.schema.json 참조로 교체.
-#       현재는 feat/trigger-entry-detection 브랜치 스키마(source/trigger 포함)를 임시 복사 사용.
-_SCHEMA_PATH: Path = Path(__file__).parents[2] / "_schema" / "flowdoc-0.1.schema.json"
+_SCHEMA_PATH: Path = Path(__file__).parents[3] / "spec" / "flowdoc-0.1.schema.json"
 
 from flowdoc.scanner.builder import build_spec
 from flowdoc.scanner.discovery import discover_python_files
@@ -42,7 +40,7 @@ logging.Logger.success = _success  # type: ignore[attr-defined]
 logger = logging.getLogger(__name__)
 
 def _load_schema() -> dict:
-    """Load the FlowDoc JSON Schema from the temporary schema file.
+    """Load the FlowDoc JSON Schema.
 
     Raises:
         FileNotFoundError: If the schema file is missing.
