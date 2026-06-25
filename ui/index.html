@@ -105,6 +105,8 @@
   .b-ext{background:var(--ext-bg);color:var(--ext)}
   .b-repo{background:#EEF0F3;color:#56627A}
   .b-cycle{background:#F0ECFB;color:var(--accent-ink)}
+  .b-write{background:#E8F1EA;color:#2E7D46}
+  .b-warn{background:var(--sem-bg);color:var(--sem);font-weight:600}
 
   .tx-group{position:relative;margin-left:22px;padding-left:20px;
     border-left:2px solid var(--tx-line);display:flex;flex-direction:column;gap:8px;
@@ -204,6 +206,10 @@ function indexSpec(spec){
 
 function loadSpec(spec){
   indexSpec(spec);
+  // Default to the first author-declared (@FlowEntry) flow; fall back to the first overall.
+  const seqs = spec.sequences || [];
+  const firstDeclared = seqs.findIndex(s => s.source !== "auto");
+  state.seqIndex = firstDeclared >= 0 ? firstDeclared : 0;
   render();
 }
 
@@ -285,7 +291,7 @@ function renderSig(node){
        + `<span class="mth">${esc(name)}</span><span class="pun">(</span>${params}${ret}`;
 }
 
-function badgesFor(node, tn, isEntry){
+function badgesFor(node, tn, isEntry, inTx){
   const out = [];
   const r = routeOf(node);
   if(r) out.push(`<span class="badge b-route">${esc(r.verb)}${r.path ? " "+esc(r.path) : ""}</span>`);
@@ -296,6 +302,10 @@ function badgesFor(node, tn, isEntry){
   if(isAsync(node)) out.push(`<span class="badge b-async">@Async</span>`);
   if(annByName(node,"FlowExternal")) out.push(`<span class="badge b-ext">external</span>`);
   if(annByName(node,"Repository")) out.push(`<span class="badge b-repo">@Repository</span>`);
+  const da = node.markers && node.markers.dataAccess;
+  if(da === "write") out.push(inTx
+    ? `<span class="badge b-write">쓰기</span>`
+    : `<span class="badge b-warn">⚠ tx-외 쓰기</span>`);
   if(tn && tn.cyclic) out.push(`<span class="badge b-cycle">↻ 순환</span>`);
   return out.join("");
 }
@@ -357,9 +367,9 @@ function renderBody(node){
 
 /* ---------------- rendering: node + children ---------------- */
 
-function renderTreeNode(tn, isEntry){
+function renderTreeNode(tn, isEntry, inTx){
   const node = state.nodesById[tn.id];
-  const badges = badgesFor(node, tn, isEntry);
+  const badges = badgesFor(node, tn, isEntry, inTx);
   const leaf = tn.children.length === 0;
 
   let html = `<div class="node${leaf ? " leaf":""}">`
@@ -375,16 +385,16 @@ function renderTreeNode(tn, isEntry){
       const txKids    = tn.children.filter(c => !isAsync(state.nodesById[c.id]));
       if(txKids.length){
         html += `<div class="tx-group"><span class="tx-label begin">tx begin</span>`
-              + txKids.map(c => renderTreeNode(c,false)).join("")
+              + txKids.map(c => renderTreeNode(c,false,true)).join("")
               + `<span class="tx-label commit">commit</span></div>`;
       }
       if(asyncKids.length){               // async post-commit lives OUTSIDE the rail
         html += `<div class="child async-out">`
-              + asyncKids.map(c => renderTreeNode(c,false)).join("") + `</div>`;
+              + asyncKids.map(c => renderTreeNode(c,false,false)).join("") + `</div>`;
       }
     } else {
       html += `<div class="child">`
-            + tn.children.map(c => renderTreeNode(c,false)).join("") + `</div>`;
+            + tn.children.map(c => renderTreeNode(c,false,inTx)).join("") + `</div>`;
     }
   }
   return html;
@@ -410,19 +420,26 @@ function render(){
   const entryNode = state.nodesById[seq.entry];
   const tree = buildTree(seq.entry);
 
-  const route = entryNode ? routeOf(entryNode) : null;
-  const routeHtml = route
-    ? `<div class="seq-route"><span class="verb">${esc(route.verb)}</span>`
-      + (route.path ? `<span class="pill">${esc(route.path)}</span>`:"")
-      + `<span class="pill">${esc(seq.tag)}</span></div>`
-    : `<div class="seq-route"><span class="pill">${esc(seq.tag)}</span></div>`;
+  // Header trigger badge from the language-neutral seq.trigger (kind drives display).
+  const trig = seq.trigger;
+  let routeInner = "";
+  if(trig){
+    if(trig.kind === "http"){
+      const verb = (trig.detail && trig.detail.verb) || "HTTP";
+      const path = (trig.detail && trig.detail.path) || "";
+      routeInner = `<span class="verb">${esc(verb)}</span>` + (path ? `<span class="pill">${esc(path)}</span>` : "");
+    } else {
+      routeInner = `<span class="verb">${esc(trig.kind)}</span><span class="pill">${esc(trig.label||"")}</span>`;
+    }
+  }
+  const routeHtml = `<div class="seq-route">${routeInner}<span class="pill">${esc(seq.tag)}</span></div>`;
 
   const title = seq.title || seq.tag;
   const desc = seq.description
     || "진입점에서 시작해 요청이 어떤 함수를 거쳐 나가는지. 행을 누르면 파라미터·리턴·어노테이션·설명이 펼쳐집니다.";
 
   const flowHtml = entryNode
-    ? `<div class="flow">${renderTreeNode(tree, true)}</div>`
+    ? `<div class="flow">${renderTreeNode(tree, true, false)}</div>`
     : `<p class="seq-desc">진입 노드 <code>${esc(seq.entry)}</code> 를 스펙에서 찾지 못했습니다.</p>`;
 
   app.innerHTML = sidebarHtml(seqs) +
@@ -441,13 +458,25 @@ function sidebarHtml(seqs){
   const counts = `${(spec.nodes||[]).length} nodes · ${(spec.edges||[]).length} edges · `
                + `${(spec.guards||[]).length} guards`;
 
-  const items = seqs.map((s,i) => {
+  const seqItem = (s,i) => {
     const en = state.nodesById[s.entry];
-    const r = en ? routeOf(en) : null;
-    const sub = r ? `${r.verb}${r.path ? " "+r.path : ""}` : (en ? `${en.owner||""}.${en.simpleName||""}` : s.entry);
+    // Neutral trigger label ("GET /x", "Scheduled · cron", "Kafka · topic"); never a framework name.
+    const sub = (s.trigger && s.trigger.label) || (en ? `${en.owner||""}.${en.simpleName||""}` : s.entry);
     return `<button class="seq-item${i===state.seqIndex?" active":""}" data-seq="${i}">`
          + `<div class="stag">${esc(s.tag)}</div><div class="sentry">${esc(sub)}</div></button>`;
-  }).join("");
+  };
+  // Preserve each sequence's ORIGINAL index (used by data-seq / state.seqIndex) when grouping.
+  const idx = seqs.map((s,i) => [s,i]);
+  const declared = idx.filter(([s]) => s.source !== "auto");
+  const autoSeqs = idx.filter(([s]) => s.source === "auto");
+  const listOf = arr => arr.map(([s,i]) => seqItem(s,i)).join("");
+  const seqSection = (declared.length && autoSeqs.length)
+    ? `<div class="sb-section-label">선언 @FlowEntry (${declared.length})</div>`
+      + `<div class="seq-list">${listOf(declared)}</div>`
+      + `<div class="sb-section-label" style="margin-top:16px">자동 감지 · 트리거 (${autoSeqs.length})</div>`
+      + `<div class="seq-list">${listOf(autoSeqs)}</div>`
+    : `<div class="sb-section-label">시퀀스 (${seqs.length})</div>`
+      + `<div class="seq-list">${listOf(idx)||'<div class="specbox">없음</div>'}</div>`;
 
   return `<aside class="sidebar">`
     + `<div class="wordmark"><span class="glyph">↳</span>FlowDoc<span class="tag">v${esc(spec.flowdoc||"?")}</span></div>`
@@ -455,7 +484,7 @@ function sidebarHtml(seqs){
     + `<div class="specbox"><div class="src-meta">${esc(meta||"unknown")}</div>`
     + `<div class="counts">${esc(counts)}</div>`
     + `<button id="loadbtn">다른 flowdoc.json 열기</button></div></div>`
-    + `<div><div class="sb-section-label">시퀀스 (${seqs.length})</div><div class="seq-list">${items||'<div class="specbox">없음</div>'}</div></div>`
+    + `<div>${seqSection}</div>`
     + `<div><div class="sb-section-label">범례</div><div class="legend">`
     + `<span class="chip"><span class="sw tx"></span>트랜잭션 경계</span>`
     + `<span class="chip"><span class="sw sem"></span>세마포어 가드</span>`
