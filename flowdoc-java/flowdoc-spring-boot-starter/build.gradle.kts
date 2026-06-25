@@ -2,12 +2,17 @@ plugins {
     `java-library`
 }
 
-description = "FlowDoc Spring Boot starter — serves the viewer + spec at /flowdoc, Swagger-style."
+description = "FlowDoc Spring Boot starter — serves the viewer + spec (and live traces) " +
+        "at /flowdoc, Swagger-style."
 
 // Aligned with the example app's Spring Boot 3.3.x (Spring Framework 6.1.x).
 dependencies {
     implementation("org.springframework.boot:spring-boot-autoconfigure:3.3.5")
     implementation("org.springframework:spring-webmvc:6.1.14")
+
+    // v0.3 runtime overlay: the AOP agent + trace model. `api` so apps that add the
+    // starter get the aspect (and aspectjweaver, which switches Spring AOP on).
+    api(project(":flowdoc-runtime"))
 
     compileOnly("org.springframework.boot:spring-boot-configuration-processor:3.3.5")
     annotationProcessor("org.springframework.boot:spring-boot-configuration-processor:3.3.5")
