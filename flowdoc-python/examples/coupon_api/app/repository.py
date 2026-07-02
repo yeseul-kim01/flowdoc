@@ -18,9 +18,13 @@ class CouponRepository:
     """Stores coupon issuances and attempt logs."""
 
     def save_issuance(self, session: Session, code: str) -> None:
-        """Persist an issuance atomically (inside a transaction)."""
+        """Persist an issuance atomically (opens the transaction boundary)."""
         with session.begin():
-            session.add(code)
+            self._insert(session, code)
+
+    def _insert(self, session: Session, code: str) -> None:
+        """Write the issuance row (covered by the caller's transaction)."""
+        session.add(code)
 
     def log_attempt(self, session: Session, code: str) -> None:
         """Append an attempt log — intentionally outside any transaction."""
