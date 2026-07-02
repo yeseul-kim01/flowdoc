@@ -53,6 +53,29 @@ def test_flow_entry_produces_declared_source(tmp_path: Path) -> None:
     assert seq.trigger is None
 
 
+def test_flow_entry_with_route_keeps_declared_source_and_trigger(tmp_path: Path) -> None:
+    """@flow_entry + @router.post → source='declared' with the http trigger attached (Java parity)."""
+    spec = _scan(tmp_path, ("api.py", """
+        from fastapi import APIRouter
+        from flowdoc.decorators import flow_entry
+        router = APIRouter(prefix="/coupons")
+
+        @flow_entry("issue-coupon")
+        @router.post("/{campaign_id}")
+        def issue(campaign_id: int) -> dict:
+            return {}
+    """))
+    seq = next((s for s in spec.sequences if s.tag == "issue-coupon"), None)
+    assert seq is not None, "Expected the declared sequence"
+    assert seq.source == "declared"
+    assert seq.trigger is not None
+    assert seq.trigger.kind == "http"
+    assert seq.trigger.detail.get("verb") == "POST"
+    assert seq.trigger.detail.get("path") == "/coupons/{campaign_id}"
+    # No duplicate auto sequence for the same entry
+    assert sum(1 for s in spec.sequences if s.entry == seq.entry) == 1
+
+
 def test_fastapi_route_produces_auto_source_with_trigger(tmp_path: Path) -> None:
     """@router.post → source='auto', trigger.kind='http'."""
     spec = _scan(tmp_path, ("routes.py", """

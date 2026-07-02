@@ -244,7 +244,8 @@ def _extract_sequences(
     """Build Sequence entries from @flow_entry and framework trigger decorators.
 
     Rules:
-    - @flow_entry("tag") → source="declared", tag from argument, trigger=None
+    - @flow_entry("tag") → source="declared", tag from argument; trigger still
+      read from any framework decorator on the same function (Java parity)
     - a recognised trigger decorator (HTTP route, websocket, scheduled, event,
       Celery task) → source="auto", tag=trigger.label
 
@@ -276,7 +277,7 @@ def _extract_sequences(
                     tag=tag,
                     entry=defn.node_id,
                     source="declared",
-                    trigger=None,
+                    trigger=_trigger_for(defn, pf.module_path, prefix_map),
                 ))
                 matched = True
                 break
