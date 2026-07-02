@@ -296,6 +296,43 @@ def _extract_sequences(
     return declared_seqs + auto_seqs
 
 
+def _reachable_from(start: str, adjacency: dict[str, list[str]]) -> list[str]:
+    """All node ids reachable from start (inclusive), DFS order, cycle-safe."""
+    seen: set[str] = set()
+    order: list[str] = []
+    stack = [start]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        order.append(cur)
+        stack.extend(reversed(adjacency.get(cur, [])))
+    return order
+
+
+def _sequence_transactions(
+    entry: str,
+    adjacency: dict[str, list[str]],
+    tx_open_ids: set[str],
+) -> list[dict]:
+    """Aggregate transaction coverage for one sequence tree (Issue #4).
+
+    Every node in the sequence tree whose markers.transaction.boundary is
+    "open" becomes an owner; covers is its whole call subtree (owner included).
+    Nested boundaries (begin_nested) each get their own entry — the inner
+    owner also appears inside the outer covers.
+    """
+    transactions: list[dict] = []
+    for node_id in _reachable_from(entry, adjacency):
+        if node_id in tx_open_ids:
+            transactions.append({
+                "owner": node_id,
+                "covers": _reachable_from(node_id, adjacency),
+            })
+    return transactions
+
+
 def build_spec(
     parsed_files: list[ParsedFile],
     resolved_edges: list[ResolvedEdge],
@@ -330,6 +367,17 @@ def build_spec(
 
     prefix_map = _build_router_prefix_map(parsed_files)
     sequences = _extract_sequences(parsed_files, prefix_map)
+
+    # Aggregate per-sequence transaction coverage from markers (Issue #4)
+    adjacency: dict[str, list[str]] = {}
+    for e in edges:
+        adjacency.setdefault(e.from_id, []).append(e.to_id)
+    tx_open_ids = {
+        n.id for n in nodes
+        if n.markers and n.markers.transaction and n.markers.transaction.get("boundary") == "open"
+    }
+    for seq in sequences:
+        seq.transactions = _sequence_transactions(seq.entry, adjacency, tx_open_ids)
 
     logger.info(
         "builder: %d nodes, %d edges, %d sequences (%d declared, %d auto)",

@@ -303,6 +303,47 @@ def test_plain_node_has_no_markers(tmp_path: Path) -> None:
     assert _node(spec, "add").markers is None
 
 
+def test_sequence_transactions_aggregated(tmp_path: Path) -> None:
+    """A tx-opening node in the sequence tree → transactions=[{owner, covers[]}]."""
+    spec = _scan(tmp_path, ("shop.py", """
+        from fastapi import APIRouter
+        router = APIRouter()
+
+        @router.post("/orders")
+        def create_order() -> dict:
+            place()
+            return {}
+
+        def place() -> None:
+            with session.begin():
+                write_rows()
+
+        def write_rows() -> None:
+            pass
+    """))
+    seq = next(s for s in spec.sequences if "POST" in s.tag)
+    assert len(seq.transactions) == 1
+    tx = seq.transactions[0]
+    assert tx["owner"].endswith("#place()")
+    assert any(c.endswith("#place()") for c in tx["covers"])
+    assert any(c.endswith("#write_rows()") for c in tx["covers"])
+    assert not any(c.endswith("#create_order()") for c in tx["covers"])
+
+
+def test_sequence_without_transaction_has_empty_list(tmp_path: Path) -> None:
+    """A sequence tree with no tx boundary → transactions == []."""
+    spec = _scan(tmp_path, ("plain.py", """
+        from fastapi import APIRouter
+        router = APIRouter()
+
+        @router.get("/ping")
+        def ping() -> dict:
+            return {}
+    """))
+    seq = next(s for s in spec.sequences if "GET" in s.tag)
+    assert seq.transactions == []
+
+
 def test_transaction_marker_serialized_to_wire(tmp_path: Path) -> None:
     """spec_to_dict emits markers.transaction and drops the null propagation."""
     spec = _scan(tmp_path, ("repo.py", """
