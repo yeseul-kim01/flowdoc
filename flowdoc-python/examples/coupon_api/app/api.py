@@ -7,7 +7,8 @@ Mirrors coupon-rush (Spring) to validate Python parity:
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from flowdoc.decorators import flow_entry
 from examples.coupon_api.app.service import CouponService
@@ -16,11 +17,16 @@ router = APIRouter(prefix="/coupon")
 _svc = CouponService()
 
 
+def get_session() -> Session:
+    """Provide a database session (wired by the app in production)."""
+    ...
+
+
 @flow_entry("issue-coupon")
 @router.post("/{campaign_id}/coupons")
-def issue_coupon(campaign_id: int, user_id: str) -> dict:
+def issue_coupon(campaign_id: int, user_id: str, session: Session = Depends(get_session)) -> dict:
     """Issue a coupon for the given campaign and user."""
-    code = _svc.issue(campaign_id, user_id)
+    code = _svc.issue(campaign_id, user_id, session)
     return {"code": code}
 
 

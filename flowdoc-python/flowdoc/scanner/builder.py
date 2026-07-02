@@ -55,7 +55,10 @@ def _build_node(defn: FunctionDef, root: Path) -> Node:
     ]
     auto = Auto(params=params, returns=returns, annotations=annotations)
     declared = Declared(description=defn.description) if defn.description else None
-    markers = Markers(dataAccess=defn.data_access) if defn.data_access else None
+    if defn.data_access or defn.transaction:
+        markers = Markers(transaction=defn.transaction, dataAccess=defn.data_access)
+    else:
+        markers = None
 
     return Node(
         id=defn.node_id,

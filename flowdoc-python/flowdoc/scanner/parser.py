@@ -35,6 +35,17 @@ _SQLA_SESSION_TYPES: frozenset[str] = frozenset({
     "AsyncSession", "Session", "scoped_session",
 })
 
+# Method names that open a SQLAlchemy transaction or savepoint boundary
+_SQLA_TX_BEGIN_METHODS: frozenset[str] = frozenset({"begin", "begin_nested"})
+
+# Receiver names that hint at a transaction-capable object (session / engine / connection)
+_TX_RECEIVER_HINTS: frozenset[str] = frozenset({
+    "session", "db", "async_session", "engine", "conn", "connection",
+})
+
+# Decorator names treated as an explicit transaction boundary (mirrors Spring @Transactional)
+_TX_DECORATOR_NAMES: frozenset[str] = frozenset({"transactional"})
+
 
 @dataclass
 class ParamInfo:
@@ -67,6 +78,8 @@ class FunctionDef:
     local_types: dict[str, str] = field(default_factory=dict)
     # SQLAlchemy access pattern detected in body
     data_access: Optional[str] = None
+    # markers.transaction boundary opened by this function ({"boundary": "open", ...}) or None
+    transaction: Optional[dict] = None
 
 
 @dataclass
@@ -140,6 +153,15 @@ def _first_docstring(body: list[ast.stmt]) -> Optional[str]:
 
 
 
+def _session_vars(local_types: dict[str, str]) -> set[str]:
+    """Variable names referring to a SQLAlchemy session (by common name or type hint)."""
+    session_vars: set[str] = {"session", "db", "async_session"}
+    for var, type_str in local_types.items():
+        if any(t in type_str for t in _SQLA_SESSION_TYPES):
+            session_vars.add(var)
+    return session_vars
+
+
 def _detect_data_access(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     local_types: dict[str, str],
@@ -149,10 +171,7 @@ def _detect_data_access(
     Scans attribute calls. Returns "write" if any session write method found,
     "read" if only read methods, None if no SQLAlchemy session calls detected.
     """
-    session_vars: set[str] = {"session", "db", "async_session"}
-    for var, type_str in local_types.items():
-        if any(t in type_str for t in _SQLA_SESSION_TYPES):
-            session_vars.add(var)
+    session_vars = _session_vars(local_types)
 
     has_write = False
     has_read = False
@@ -180,6 +199,44 @@ def _detect_data_access(
         return "write"
     if has_read:
         return "read"
+    return None
+
+
+def _detect_transaction(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    local_types: dict[str, str],
+    annotations: list[AnnotationInfo],
+) -> Optional[dict]:
+    """Detect whether this function opens a transaction boundary.
+
+    Mirrors Spring's ``@Transactional`` marker in a language-neutral way. The
+    boundary is ``"open"`` when the function is decorated with a transactional
+    decorator, or its body opens a SQLAlchemy transaction/savepoint
+    (``with session.begin():``, ``session.begin_nested()``, ``engine.begin()``, …).
+
+    Returns ``{"boundary": "open", "propagation": <str|None>}`` or ``None``.
+    """
+    # Decorator signal (mirrors @Transactional); propagation from a kwarg if present.
+    for ann in annotations:
+        if ann.name.lower() in _TX_DECORATOR_NAMES:
+            propagation = ann.attributes.get("propagation")
+            if propagation is not None:
+                propagation = propagation.strip("\"'")
+            return {"boundary": "open", "propagation": propagation}
+
+    # Body signal: a .begin()/.begin_nested() call on a session / engine / connection.
+    tx_receivers = _session_vars(local_types) | _TX_RECEIVER_HINTS
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Call):
+            continue
+        func = child.func
+        if not isinstance(func, ast.Attribute):
+            continue
+        if func.attr not in _SQLA_TX_BEGIN_METHODS:
+            continue
+        if isinstance(func.value, ast.Name) and func.value.id in tx_receivers:
+            return {"boundary": "open", "propagation": None}
+
     return None
 
 # ---------------------------------------------------------------------------
@@ -317,6 +374,8 @@ class _FileVisitor(ast.NodeVisitor):
 
         desc = _first_docstring(node.body)
 
+        transaction = _detect_transaction(node, local_types, annotations)
+
         func_def = FunctionDef(
             node_id=node_id,
             simple_name=node.name,
@@ -329,6 +388,7 @@ class _FileVisitor(ast.NodeVisitor):
             description=desc,
             local_types=local_types,
             data_access=data_access,
+            transaction=transaction,
         )
         self.definitions.append(func_def)
 

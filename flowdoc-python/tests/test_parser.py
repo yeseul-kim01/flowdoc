@@ -234,3 +234,125 @@ def test_data_access_bulk_write(tmp_path: Path) -> None:
     assert result is not None
     defn = result.definitions[0]
     assert defn.data_access == "write"
+
+
+# ---------------------------------------------------------------------------
+# markers.transaction — SQLAlchemy transaction boundary detection
+# ---------------------------------------------------------------------------
+
+def test_transaction_with_session_begin(tmp_path: Path) -> None:
+    """`with session.begin():` opens a transaction boundary."""
+    src = """
+        def transfer(session, src, dst, amount):
+            with session.begin():
+                session.add(src)
+                session.add(dst)
+    """
+    f = _write_py(tmp_path, "svc.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.transaction == {"boundary": "open", "propagation": None}
+
+
+def test_transaction_async_with_session_begin(tmp_path: Path) -> None:
+    """`async with session.begin():` opens a transaction boundary."""
+    src = """
+        from sqlalchemy.ext.asyncio import AsyncSession
+        async def create(session: AsyncSession, obj):
+            async with session.begin():
+                session.add(obj)
+    """
+    f = _write_py(tmp_path, "svc.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.transaction is not None
+    assert defn.transaction["boundary"] == "open"
+
+
+def test_transaction_begin_nested(tmp_path: Path) -> None:
+    """`session.begin_nested()` (SAVEPOINT) opens a boundary."""
+    src = """
+        def with_savepoint(session, obj):
+            session.begin_nested()
+            session.add(obj)
+    """
+    f = _write_py(tmp_path, "svc.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.transaction is not None
+    assert defn.transaction["boundary"] == "open"
+
+
+def test_transaction_engine_begin(tmp_path: Path) -> None:
+    """`with engine.begin():` (Core) opens a boundary."""
+    src = """
+        def run(engine):
+            with engine.begin() as conn:
+                conn.execute("UPDATE t SET x = 1")
+    """
+    f = _write_py(tmp_path, "svc.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.transaction is not None
+    assert defn.transaction["boundary"] == "open"
+
+
+def test_transaction_decorator(tmp_path: Path) -> None:
+    """A `@transactional` decorator marks the boundary (mirrors @Transactional)."""
+    src = """
+        @transactional
+        def do_work(session, obj):
+            session.add(obj)
+    """
+    f = _write_py(tmp_path, "svc.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.transaction is not None
+    assert defn.transaction["boundary"] == "open"
+
+
+def test_transaction_decorator_propagation(tmp_path: Path) -> None:
+    """`@transactional(propagation="REQUIRES_NEW")` captures propagation, unquoted."""
+    src = """
+        @transactional(propagation="REQUIRES_NEW")
+        def do_work(session, obj):
+            session.add(obj)
+    """
+    f = _write_py(tmp_path, "svc.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.transaction == {"boundary": "open", "propagation": "REQUIRES_NEW"}
+
+
+def test_transaction_none_for_plain_write(tmp_path: Path) -> None:
+    """A write with no transaction boundary → transaction is None (atomicity smell)."""
+    src = """
+        def save(session, obj):
+            session.add(obj)
+            session.commit()
+    """
+    f = _write_py(tmp_path, "repo.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.data_access == "write"
+    assert defn.transaction is None
+
+
+def test_transaction_none_for_non_db_function(tmp_path: Path) -> None:
+    """A plain function opens no transaction."""
+    src = """
+        def add_numbers(a: int, b: int) -> int:
+            return a + b
+    """
+    f = _write_py(tmp_path, "utils.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.transaction is None

@@ -10,6 +10,7 @@ import pytest
 from flowdoc.scanner.builder import build_spec
 from flowdoc.scanner.parser import parse_file
 from flowdoc.scanner.resolver import DefinitionIndex, resolve_call_sites
+from flowdoc.spec import spec_to_dict
 
 
 # ---------------------------------------------------------------------------
@@ -139,3 +140,58 @@ def test_route_without_path_string(tmp_path: Path) -> None:
     """))
     # Should not raise; may produce a sequence with empty path
     assert isinstance(spec.sequences, list)
+
+
+# ---------------------------------------------------------------------------
+# markers.transaction — node markers + wire serialization
+# ---------------------------------------------------------------------------
+
+def _node(spec, simple_name):
+    return next(n for n in spec.nodes if n.simpleName == simple_name)
+
+
+def test_transactional_write_node_has_both_markers(tmp_path: Path) -> None:
+    """A write inside `with session.begin()` → markers.transaction + dataAccess='write'."""
+    spec = _scan(tmp_path, ("repo.py", """
+        def save(session, obj):
+            with session.begin():
+                session.add(obj)
+    """))
+    node = _node(spec, "save")
+    assert node.markers is not None
+    assert node.markers.transaction == {"boundary": "open", "propagation": None}
+    assert node.markers.dataAccess == "write"
+
+
+def test_write_without_transaction_has_no_tx_marker(tmp_path: Path) -> None:
+    """A write with no boundary → dataAccess='write', transaction is None (the smell)."""
+    spec = _scan(tmp_path, ("repo.py", """
+        def save(session, obj):
+            session.add(obj)
+    """))
+    node = _node(spec, "save")
+    assert node.markers is not None
+    assert node.markers.dataAccess == "write"
+    assert node.markers.transaction is None
+
+
+def test_plain_node_has_no_markers(tmp_path: Path) -> None:
+    """A function touching neither data nor a transaction gets markers=None."""
+    spec = _scan(tmp_path, ("utils.py", """
+        def add(a: int, b: int) -> int:
+            return a + b
+    """))
+    assert _node(spec, "add").markers is None
+
+
+def test_transaction_marker_serialized_to_wire(tmp_path: Path) -> None:
+    """spec_to_dict emits markers.transaction and drops the null propagation."""
+    spec = _scan(tmp_path, ("repo.py", """
+        def save(session, obj):
+            with session.begin():
+                session.add(obj)
+    """))
+    d = spec_to_dict(spec)
+    node = next(n for n in d["nodes"] if n["simpleName"] == "save")
+    assert node["markers"]["transaction"] == {"boundary": "open"}
+    assert node["markers"]["dataAccess"] == "write"
