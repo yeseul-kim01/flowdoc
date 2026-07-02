@@ -109,7 +109,11 @@ def _decorator_to_info(dec: ast.expr) -> Optional[AnnotationInfo]:
     if isinstance(dec, ast.Name):
         return AnnotationInfo(name=dec.id)
     if isinstance(dec, ast.Attribute):
-        return AnnotationInfo(name=dec.attr)
+        # Keep the receiver for bare attribute decorators too (@celery_app.task)
+        attrs: dict[str, str] = {}
+        if isinstance(dec.value, ast.Name):
+            attrs["__receiver__"] = dec.value.id
+        return AnnotationInfo(name=dec.attr, attributes=attrs)
     if isinstance(dec, ast.Call):
         # func part
         receiver: str | None = None

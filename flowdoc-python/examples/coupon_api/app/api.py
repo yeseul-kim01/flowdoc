@@ -35,3 +35,9 @@ def get_remaining(campaign_id: int) -> dict:
     """Return remaining coupon count for the campaign."""
     remaining = _svc.get_remaining(campaign_id)
     return {"remaining": remaining}
+
+
+@router.websocket("/live")
+async def live_stock(campaign_id: int) -> None:
+    """Stream remaining stock updates over a WebSocket."""
+    _svc.get_remaining(campaign_id)

@@ -143,6 +143,125 @@ def test_route_without_path_string(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# trigger kinds — websocket / scheduled / event / messaging (Issue #2)
+# ---------------------------------------------------------------------------
+
+def _seq_by_kind(spec, kind):
+    return next((s for s in spec.sequences if s.trigger and s.trigger.kind == kind), None)
+
+
+def test_websocket_route_trigger(tmp_path: Path) -> None:
+    """@router.websocket → kind='websocket', label 'WS · {prefixed path}'."""
+    spec = _scan(tmp_path, ("ws.py", """
+        from fastapi import APIRouter
+        router = APIRouter(prefix="/ws")
+
+        @router.websocket("/live")
+        async def live_updates(campaign_id: int) -> None:
+            pass
+    """))
+    seq = _seq_by_kind(spec, "websocket")
+    assert seq is not None
+    assert seq.trigger.label == "WS · /ws/live"
+    assert seq.trigger.detail == {"destination": "/ws/live"}
+    assert seq.source == "auto"
+
+
+def test_websocket_like_decorator_not_detected(tmp_path: Path) -> None:
+    """A decorator merely resembling websocket (websocket_connect) is not a trigger."""
+    spec = _scan(tmp_path, ("ws.py", """
+        @app.websocket_connect
+        async def handler() -> None:
+            pass
+    """))
+    assert _seq_by_kind(spec, "websocket") is None
+
+
+def test_repeat_every_scheduled_trigger(tmp_path: Path) -> None:
+    """@repeat_every(seconds=60) → kind='scheduled', rate in ms (Java form)."""
+    spec = _scan(tmp_path, ("jobs.py", """
+        from fastapi_utils.tasks import repeat_every
+
+        @repeat_every(seconds=60)
+        def refresh_cache() -> None:
+            pass
+    """))
+    seq = _seq_by_kind(spec, "scheduled")
+    assert seq is not None
+    assert seq.trigger.label == "Scheduled · rate 60000ms"
+    assert seq.trigger.detail == {"fixedRate": "60000"}
+
+
+def test_repeat_every_non_constant_falls_back_plain(tmp_path: Path) -> None:
+    """A non-constant seconds= keeps a plain 'Scheduled' label (no invented detail)."""
+    spec = _scan(tmp_path, ("jobs.py", """
+        from fastapi_utils.tasks import repeat_every
+
+        @repeat_every(seconds=INTERVAL)
+        def refresh_cache() -> None:
+            pass
+    """))
+    seq = _seq_by_kind(spec, "scheduled")
+    assert seq is not None
+    assert seq.trigger.label == "Scheduled"
+    assert seq.trigger.detail == {}
+
+
+def test_on_event_startup_trigger(tmp_path: Path) -> None:
+    """@app.on_event("startup") → kind='event', label 'Event · startup'."""
+    spec = _scan(tmp_path, ("lifecycle.py", """
+        @app.on_event("startup")
+        async def warm_up() -> None:
+            pass
+    """))
+    seq = _seq_by_kind(spec, "event")
+    assert seq is not None
+    assert seq.trigger.label == "Event · startup"
+    assert seq.trigger.detail == {"event": "startup"}
+
+
+def test_on_event_like_decorator_not_detected(tmp_path: Path) -> None:
+    """A decorator merely resembling on_event is not a trigger."""
+    spec = _scan(tmp_path, ("lifecycle.py", """
+        @app.on_events
+        async def warm_up() -> None:
+            pass
+    """))
+    assert _seq_by_kind(spec, "event") is None
+
+
+def test_shared_task_messaging_trigger(tmp_path: Path) -> None:
+    """Celery @shared_task → kind='messaging', broker Celery."""
+    spec = _scan(tmp_path, ("workers.py", """
+        from celery import shared_task
+
+        @shared_task(queue="emails")
+        def send_email(to: str) -> None:
+            pass
+    """))
+    seq = _seq_by_kind(spec, "messaging")
+    assert seq is not None
+    assert seq.trigger.label == "Celery · emails"
+    assert seq.trigger.detail == {"broker": "Celery", "destination": "emails"}
+
+
+def test_celery_app_task_receiver_required(tmp_path: Path) -> None:
+    """@celery_app.task is detected; a generic @app.task receiver is not (miss > false positive)."""
+    spec = _scan(tmp_path, ("workers.py", """
+        @celery_app.task
+        def process() -> None:
+            pass
+
+        @app.task
+        def not_a_task() -> None:
+            pass
+    """))
+    msgs = [s for s in spec.sequences if s.trigger and s.trigger.kind == "messaging"]
+    assert len(msgs) == 1
+    assert msgs[0].entry.endswith("#process()")
+
+
+# ---------------------------------------------------------------------------
 # markers.transaction — node markers + wire serialization
 # ---------------------------------------------------------------------------
 

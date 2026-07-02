@@ -36,6 +36,20 @@ _FLOW_ENTRY_NAMES: frozenset[str] = frozenset({"flow_entry"})
 # Trigger kind for HTTP routes
 _HTTP_KIND: str = "http"
 
+# WebSocket route decorators: @app.websocket("/path") / @router.websocket_route("/path")
+_WEBSOCKET_ATTRS: frozenset[str] = frozenset({"websocket", "websocket_route"})
+
+# Scheduled decorators: fastapi-utils @repeat_every(seconds=N), APScheduler @scheduler.scheduled_job(...)
+_SCHEDULED_ATTRS: frozenset[str] = frozenset({"repeat_every", "scheduled_job"})
+
+# Lifecycle event decorators: @app.on_event("startup") / @router.on_event("shutdown")
+_EVENT_ATTRS: frozenset[str] = frozenset({"on_event"})
+
+# Celery task decorators: @shared_task always; @<celery*>.task only when the receiver
+# names a celery app — an unknown `obj.task` is more likely a false positive than a task.
+_MESSAGING_BARE_ATTRS: frozenset[str] = frozenset({"shared_task"})
+_MESSAGING_RECEIVER_ATTR: str = "task"
+
 
 def _relative_path(file: Path, root: Path) -> str:
     """Return POSIX-style relative path from root, or absolute fallback."""
@@ -138,17 +152,100 @@ def _extract_receiver(defn: FunctionDef, method_name: str) -> str | None:
     return None
 
 
+def _http_trigger(ann, module_path: str, prefix_map: dict[tuple[str, str], str]) -> Trigger:
+    """FastAPI route decorator → kind='http' (label/detail mirror the Java collector)."""
+    verb = ann.name.upper()
+    route_path = ann.attributes.get("value", "").strip("\"'")
+    receiver = ann.attributes.get("__receiver__")
+    path = _full_path(receiver, route_path, module_path, prefix_map)
+    detail = {"verb": verb}
+    if path:
+        detail["path"] = path
+    return Trigger(kind=_HTTP_KIND, label=f"{verb} {path}" if path else verb, detail=detail)
+
+
+def _websocket_trigger(ann, module_path: str, prefix_map: dict[tuple[str, str], str]) -> Trigger:
+    """@app.websocket("/path") → kind='websocket', label 'WS · {path}'."""
+    route_path = ann.attributes.get("value", "").strip("\"'")
+    receiver = ann.attributes.get("__receiver__")
+    dest = _full_path(receiver, route_path, module_path, prefix_map)
+    detail = {"destination": dest} if dest else {}
+    return Trigger(kind="websocket", label=f"WS · {dest}" if dest else "WebSocket", detail=detail)
+
+
+def _scheduled_trigger(ann) -> Trigger:
+    """@repeat_every(seconds=N) / APScheduler @scheduled_job → kind='scheduled'.
+
+    Mirrors the Java collector: fixedRate is expressed in ms ("Scheduled · rate 60000ms");
+    a schedule we cannot express as a constant stays a plain "Scheduled".
+    """
+    detail: dict[str, str] = {}
+    when = ""
+    seconds = ann.attributes.get("seconds")
+    if seconds is not None:
+        try:
+            ms = int(float(seconds) * 1000)
+            when = f"rate {ms}ms"
+            detail["fixedRate"] = str(ms)
+        except ValueError:
+            pass  # non-constant seconds= expression — emit plain "Scheduled"
+    return Trigger(kind="scheduled", label=f"Scheduled · {when}" if when else "Scheduled", detail=detail)
+
+
+def _event_trigger(ann) -> Trigger:
+    """@app.on_event("startup"/"shutdown") → kind='event', label 'Event · {type}'."""
+    event_type = ann.attributes.get("value", "").strip("\"'")
+    detail = {"event": event_type} if event_type else {}
+    return Trigger(kind="event", label=f"Event · {event_type}" if event_type else "Event", detail=detail)
+
+
+def _messaging_trigger(ann) -> Trigger:
+    """Celery @shared_task / @celery_app.task → kind='messaging', broker 'Celery'."""
+    dest = ann.attributes.get("queue", "").strip("\"'")
+    detail = {"broker": "Celery"}
+    if dest:
+        detail["destination"] = dest
+    return Trigger(kind="messaging", label=f"Celery · {dest}" if dest else "Celery", detail=detail)
+
+
+def _trigger_for(
+    defn: FunctionDef,
+    module_path: str,
+    prefix_map: dict[tuple[str, str], str],
+) -> Trigger | None:
+    """Map a function's decorators to a language-neutral Trigger (mirrors Java triggerFor).
+
+    Only confident FastAPI-ecosystem patterns are mapped — a miss is better
+    than a false trigger. Returns the first match in decorator order.
+    """
+    for ann in defn.annotations:
+        if ann.name in _HTTP_METHODS:
+            return _http_trigger(ann, module_path, prefix_map)
+        if ann.name in _WEBSOCKET_ATTRS:
+            return _websocket_trigger(ann, module_path, prefix_map)
+        if ann.name in _SCHEDULED_ATTRS:
+            return _scheduled_trigger(ann)
+        if ann.name in _EVENT_ATTRS:
+            return _event_trigger(ann)
+        if ann.name in _MESSAGING_BARE_ATTRS:
+            return _messaging_trigger(ann)
+        if ann.name == _MESSAGING_RECEIVER_ATTR:
+            receiver = ann.attributes.get("__receiver__", "")
+            if "celery" in receiver.lower():
+                return _messaging_trigger(ann)
+    return None
+
+
 def _extract_sequences(
     parsed_files: list[ParsedFile],
     prefix_map: dict[tuple[str, str], str],
 ) -> list[Sequence]:
-    """Build Sequence entries from @flow_entry and FastAPI route decorators.
+    """Build Sequence entries from @flow_entry and framework trigger decorators.
 
     Rules:
     - @flow_entry("tag") → source="declared", tag from argument, trigger=None
-    - HTTP route decorator → source="auto", tag="{VERB} {full_path}",
-        trigger=Trigger(kind="http", label="{VERB} {full_path}",
-                        detail={"verb": "VERB", "path": "/full_path"})
+    - a recognised trigger decorator (HTTP route, websocket, scheduled, event,
+      Celery task) → source="auto", tag=trigger.label
 
     Args:
         parsed_files: All parsed files.
@@ -186,26 +283,15 @@ def _extract_sequences(
             if matched:
                 continue
 
-            # ── FastAPI HTTP route ───────────────────────────────────────
-            for ann in defn.annotations:
-                if ann.name not in _HTTP_METHODS:
-                    continue
-                verb = ann.name.upper()
-                route_path = ann.attributes.get("value", "").strip("\"'")
-                receiver = ann.attributes.get("__receiver__")
-                path = _full_path(receiver, route_path, pf.module_path, prefix_map)
-                label = f"{verb} {path}" if path else verb
+            # ── framework triggers (http / websocket / scheduled / event / messaging) ──
+            trigger = _trigger_for(defn, pf.module_path, prefix_map)
+            if trigger is not None:
                 auto_seqs.append(Sequence(
-                    tag=label,
+                    tag=trigger.label or defn.simple_name,
                     entry=defn.node_id,
                     source="auto",
-                    trigger=Trigger(
-                        kind=_HTTP_KIND,
-                        label=label,
-                        detail={"verb": verb, "path": path},
-                    ),
+                    trigger=trigger,
                 ))
-                break
 
     return declared_seqs + auto_seqs
 
