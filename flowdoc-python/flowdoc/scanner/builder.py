@@ -12,6 +12,7 @@ from flowdoc.spec import (
     Declared,
     Markers,
     Edge,
+    Guard,
     Location,
     Node,
     NodeAnnotation,
@@ -296,6 +297,51 @@ def _extract_sequences(
     return declared_seqs + auto_seqs
 
 
+def _extract_guards(parsed_files: list[ParsedFile]) -> list[Guard]:
+    """Collect concurrency guards (Java-parity shape: nodeId/type/resource/permits/source).
+
+    - @guarded(resource=, permits=) → source="declared" (mirrors Java @Guarded)
+    - `with`/`async with` on an asyncio/threading Semaphore/Lock variable
+      → source="auto", resource = variable name, permits captured for constants only
+    """
+    guards: list[Guard] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def _add(guard: Guard) -> None:
+        key = (guard.nodeId, guard.type, guard.resource)
+        if key not in seen:
+            seen.add(key)
+            guards.append(guard)
+
+    for pf in parsed_files:
+        for defn in pf.definitions:
+            for ann in defn.annotations:
+                if ann.name != "guarded":
+                    continue
+                resource = (ann.attributes.get("resource") or ann.attributes.get("value") or "").strip("\"'")
+                permits_str = ann.attributes.get("permits", "")
+                permits = int(permits_str) if permits_str.isdigit() else 1
+                _add(Guard(
+                    nodeId=defn.node_id,
+                    type="semaphore",
+                    resource=resource or defn.simple_name,
+                    permits=permits,
+                    source="declared",
+                ))
+            for var in defn.guard_uses:
+                gv = pf.guard_vars.get(var)
+                if gv is None:
+                    continue
+                _add(Guard(
+                    nodeId=defn.node_id,
+                    type=gv["type"],
+                    resource=var,
+                    permits=gv.get("permits"),
+                    source="auto",
+                ))
+    return guards
+
+
 def _reachable_from(start: str, adjacency: dict[str, list[str]]) -> list[str]:
     """All node ids reachable from start (inclusive), DFS order, cycle-safe."""
     seen: set[str] = set()
@@ -386,11 +432,13 @@ def build_spec(
         sum(1 for s in sequences if s.source == "auto"),
     )
 
+    guards = _extract_guards(parsed_files)
+
     return Spec(
         source=Source(language="python", framework="fastapi", collector="static"),
         nodes=nodes,
         edges=edges,
         sequences=sequences,
-        guards=[],
+        guards=guards,
         traces=[],
     )

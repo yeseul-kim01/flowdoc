@@ -262,6 +262,76 @@ def test_celery_app_task_receiver_required(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# guards — semaphore / lock detection
+# ---------------------------------------------------------------------------
+
+def test_guard_semaphore_async_with(tmp_path: Path) -> None:
+    """asyncio.Semaphore(5) + async with → guard type='semaphore', permits=5, auto."""
+    spec = _scan(tmp_path, ("svc.py", """
+        import asyncio
+        sem = asyncio.Semaphore(5)
+
+        async def reserve(campaign_id: int) -> bool:
+            async with sem:
+                return True
+    """))
+    assert len(spec.guards) == 1
+    g = spec.guards[0]
+    assert g.type == "semaphore"
+    assert g.resource == "sem"
+    assert g.permits == 5
+    assert g.source == "auto"
+    assert g.nodeId.endswith("#reserve(int)")
+
+
+def test_guard_lock_threading(tmp_path: Path) -> None:
+    """threading.Lock() + with → guard type='lock', no permits."""
+    spec = _scan(tmp_path, ("svc.py", """
+        import threading
+        _lock = threading.Lock()
+
+        def update_counter() -> None:
+            with _lock:
+                pass
+    """))
+    assert len(spec.guards) == 1
+    g = spec.guards[0]
+    assert g.type == "lock"
+    assert g.resource == "_lock"
+    assert g.permits is None
+    assert g.source == "auto"
+
+
+def test_guard_unknown_context_not_detected(tmp_path: Path) -> None:
+    """`with` on a non-primitive (open()) or unknown Lock() emits no guard."""
+    spec = _scan(tmp_path, ("svc.py", """
+        lock = CustomLock()
+
+        def write_file(path: str) -> None:
+            with lock:
+                pass
+    """))
+    assert spec.guards == []
+
+
+def test_guard_declared_from_guarded_decorator(tmp_path: Path) -> None:
+    """@guarded(resource=, permits=) → source='declared' (mirrors Java @Guarded)."""
+    spec = _scan(tmp_path, ("svc.py", """
+        from flowdoc.decorators import guarded
+
+        @guarded(resource="coupon-stock", permits=1)
+        def reserve_stock(campaign_id: int) -> bool:
+            return True
+    """))
+    assert len(spec.guards) == 1
+    g = spec.guards[0]
+    assert g.type == "semaphore"
+    assert g.resource == "coupon-stock"
+    assert g.permits == 1
+    assert g.source == "declared"
+
+
+# ---------------------------------------------------------------------------
 # markers.transaction — node markers + wire serialization
 # ---------------------------------------------------------------------------
 

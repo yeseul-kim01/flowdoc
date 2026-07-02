@@ -120,6 +120,17 @@ class Sequence:
 
 
 @dataclass
+class Guard:
+    """A concurrency guard protecting a node (semaphore / lock)."""
+
+    nodeId: str
+    type: str  # "semaphore" | "lock"
+    resource: str
+    permits: int | None = None
+    source: str = "auto"  # "declared" (@guarded) | "auto" (sync primitive usage)
+
+
+@dataclass
 class Source:
     """Describes the source language/framework/collector."""
 

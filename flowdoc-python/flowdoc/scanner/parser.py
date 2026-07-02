@@ -46,6 +46,11 @@ _TX_RECEIVER_HINTS: frozenset[str] = frozenset({
 # Decorator names treated as an explicit transaction boundary (mirrors Spring @Transactional)
 _TX_DECORATOR_NAMES: frozenset[str] = frozenset({"transactional"})
 
+# Constructor names for concurrency guard primitives (asyncio / threading)
+_GUARD_SEMAPHORE_CTORS: frozenset[str] = frozenset({"Semaphore", "BoundedSemaphore"})
+_GUARD_LOCK_CTORS: frozenset[str] = frozenset({"Lock", "RLock"})
+_GUARD_MODULES: frozenset[str] = frozenset({"asyncio", "threading"})
+
 
 @dataclass
 class ParamInfo:
@@ -80,6 +85,8 @@ class FunctionDef:
     data_access: Optional[str] = None
     # markers.transaction boundary opened by this function ({"boundary": "open", ...}) or None
     transaction: Optional[dict] = None
+    # Variable names used as `with`/`async with` context in the body (guard candidates)
+    guard_uses: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -206,6 +213,36 @@ def _detect_data_access(
     return None
 
 
+def _guard_ctor(call: ast.expr, from_imports: dict[str, str]) -> Optional[dict]:
+    """Classify a value as a guard-primitive constructor, or None.
+
+    Recognises ``asyncio.Semaphore(5)`` / ``threading.Lock()`` style attribute
+    calls, and bare names (``Semaphore(5)``) only when a from-import resolves
+    them to asyncio/threading — an unknown ``Lock()`` is more likely a false
+    positive than a guard. permits is captured for constants only.
+    """
+    if not isinstance(call, ast.Call):
+        return None
+    func = call.func
+    ctor: Optional[str] = None
+    if isinstance(func, ast.Attribute):
+        if isinstance(func.value, ast.Name) and func.value.id in _GUARD_MODULES:
+            ctor = func.attr
+    elif isinstance(func, ast.Name):
+        full = from_imports.get(func.id, "")
+        if full.split(".")[0] in _GUARD_MODULES:
+            ctor = func.id
+    if ctor in _GUARD_SEMAPHORE_CTORS:
+        permits: Optional[int] = 1  # asyncio/threading default when no arg is given
+        if call.args:
+            first = call.args[0]
+            permits = first.value if isinstance(first, ast.Constant) and isinstance(first.value, int) else None
+        return {"type": "semaphore", "permits": permits}
+    if ctor in _GUARD_LOCK_CTORS:
+        return {"type": "lock", "permits": None}
+    return None
+
+
 def _detect_transaction(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     local_types: dict[str, str],
@@ -263,6 +300,8 @@ class _FileVisitor(ast.NodeVisitor):
         self._from_imports: dict[str, str] = {}
         # variable_name → prefix string from APIRouter(prefix=...)
         self.router_prefixes: dict[str, str] = {}
+        # variable_name → {"type": "semaphore"|"lock", "permits": int|None}
+        self.guard_vars: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # Import tracking (for resolution hints — stored but used by resolver)
@@ -286,11 +325,15 @@ class _FileVisitor(ast.NodeVisitor):
     # ------------------------------------------------------------------
 
     def visit_Assign(self, node: ast.Assign) -> None:
-        """Capture `router = APIRouter(prefix="/foo")` at module level."""
-        if self._func_stack or self._class_stack:
+        """Capture APIRouter(prefix=...) bindings and guard-primitive assignments."""
+        if not (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
             self.generic_visit(node)
             return
-        if not (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+        # Guard primitives are captured at any scope (module or function local)
+        guard = _guard_ctor(node.value, self._from_imports)
+        if guard is not None:
+            self.guard_vars[node.targets[0].id] = guard
+        if self._func_stack or self._class_stack:
             self.generic_visit(node)
             return
         var_name = node.targets[0].id
@@ -380,6 +423,15 @@ class _FileVisitor(ast.NodeVisitor):
 
         transaction = _detect_transaction(node, local_types, annotations)
 
+        # Bare-name `with`/`async with` contexts — guard candidates resolved by the builder
+        guard_uses: list[str] = []
+        for stmt in ast.walk(node):
+            if isinstance(stmt, (ast.With, ast.AsyncWith)):
+                for item in stmt.items:
+                    ctx = item.context_expr
+                    if isinstance(ctx, ast.Name) and ctx.id not in guard_uses:
+                        guard_uses.append(ctx.id)
+
         func_def = FunctionDef(
             node_id=node_id,
             simple_name=node.name,
@@ -393,6 +445,7 @@ class _FileVisitor(ast.NodeVisitor):
             local_types=local_types,
             data_access=data_access,
             transaction=transaction,
+            guard_uses=guard_uses,
         )
         self.definitions.append(func_def)
 
@@ -462,6 +515,7 @@ class ParsedFile:
     import_aliases: dict[str, str]   # alias → full module path
     from_imports: dict[str, str]     # name → module.name
     router_prefixes: dict[str, str]  # var_name → prefix string from APIRouter(prefix=...)
+    guard_vars: dict[str, dict]      # var_name → {"type": "semaphore"|"lock", "permits": int|None}
 
 
 def parse_file(file: Path, root: Path) -> Optional[ParsedFile]:
@@ -507,4 +561,5 @@ def parse_file(file: Path, root: Path) -> Optional[ParsedFile]:
         import_aliases=visitor._import_aliases,
         from_imports=visitor._from_imports,
         router_prefixes=visitor.router_prefixes,
+        guard_vars=visitor.guard_vars,
     )
