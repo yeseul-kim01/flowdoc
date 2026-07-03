@@ -98,6 +98,7 @@ class CallSite:
     callee_receiver: Optional[str]   # name of the receiver object (for attr calls)
     file: Path
     line: int
+    in_loop: bool = False  # call occurs inside a for/while loop in the caller body
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +293,7 @@ class _FileVisitor(ast.NodeVisitor):
         self._file = file
         self._class_stack: list[str] = []
         self._func_stack: list[str] = []  # node_ids of enclosing functions
+        self._loop_depth: int = 0  # nesting depth of for/while loops in the current function
         self.definitions: list[FunctionDef] = []
         self.call_sites: list[CallSite] = []
         # import alias → full module.name  (e.g. "auth_service" → "app.services.auth_service")
@@ -364,6 +366,35 @@ class _FileVisitor(ast.NodeVisitor):
         self._class_stack.append(node.name)
         self.generic_visit(node)
         self._class_stack.pop()
+
+    # ------------------------------------------------------------------
+    # Loop tracking — mark call sites nested in for/while (N+1 candidates)
+    # ------------------------------------------------------------------
+
+    def _visit_for(self, node: ast.For | ast.AsyncFor) -> None:
+        # The iterable is evaluated once, before the loop — not "in loop"
+        # (so `for row in session.query(...)` is a single query, not N+1).
+        self.visit(node.iter)
+        self.visit(node.target)
+        self._loop_depth += 1
+        for stmt in node.body:
+            self.visit(stmt)
+        self._loop_depth -= 1
+        # `else:` runs once after the loop completes — outer depth.
+        for stmt in node.orelse:
+            self.visit(stmt)
+
+    def visit_For(self, node: ast.For) -> None:
+        self._visit_for(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._visit_for(node)
+
+    def visit_While(self, node: ast.While) -> None:
+        # The test re-evaluates every iteration, so it counts as in-loop.
+        self._loop_depth += 1
+        self.generic_visit(node)
+        self._loop_depth -= 1
 
     # ------------------------------------------------------------------
     # Function definitions
@@ -449,9 +480,13 @@ class _FileVisitor(ast.NodeVisitor):
         )
         self.definitions.append(func_def)
 
-        # Descend into body to collect call sites
+        # Descend into body to collect call sites. Loop depth is function-scoped
+        # so a nested def inside a loop doesn't inherit the enclosing loop.
         self._func_stack.append(node_id)
+        saved_loop_depth = self._loop_depth
+        self._loop_depth = 0
         self.generic_visit(node)
+        self._loop_depth = saved_loop_depth
         self._func_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -480,6 +515,7 @@ class _FileVisitor(ast.NodeVisitor):
                 callee_receiver=None,
                 file=self._file,
                 line=node.lineno,
+                in_loop=self._loop_depth > 0,
             ))
         elif isinstance(func, ast.Attribute):
             # attribute call: obj.method(...)
@@ -495,6 +531,7 @@ class _FileVisitor(ast.NodeVisitor):
                 callee_receiver=receiver,
                 file=self._file,
                 line=node.lineno,
+                in_loop=self._loop_depth > 0,
             ))
 
         self.generic_visit(node)

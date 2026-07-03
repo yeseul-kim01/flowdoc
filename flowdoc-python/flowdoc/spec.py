@@ -109,6 +109,21 @@ class Trigger:
 
 
 @dataclass
+class Smell:
+    """A structural smell attached to a sequence, anchored on the offending node.
+
+    Derived purely from existing markers (data access, transactions, guards) by
+    the rule engine — no new source extraction. Absent (``None``) on clean
+    sequences so the wire format stays additive.
+    """
+
+    rule: str        # rule identifier, e.g. "tx_outside_write"
+    nodeId: str      # node the smell is anchored on
+    severity: str    # "warn" | "error"
+    message: str
+
+
+@dataclass
 class Sequence:
     """An entry-point tagged sequence (from @flow_entry or auto-detected route)."""
 
@@ -117,6 +132,7 @@ class Sequence:
     source: str = "auto"  # "declared" (@flow_entry) | "auto" (framework annotation)
     trigger: Trigger | None = None
     transactions: list[Any] = field(default_factory=list)
+    smells: list[Any] | None = None  # populated by the rule engine; None when clean
 
 
 @dataclass

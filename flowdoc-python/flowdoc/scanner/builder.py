@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from flowdoc.rules import run_rules
 from flowdoc.scanner.parser import FunctionDef, ParsedFile
 from flowdoc.scanner.resolver import ResolvedEdge
 from flowdoc.spec import (
@@ -435,7 +436,7 @@ def build_spec(
 
     guards = _extract_guards(parsed_files)
 
-    return Spec(
+    spec = Spec(
         source=Source(language="python", framework="fastapi", collector="static"),
         nodes=nodes,
         edges=edges,
@@ -443,3 +444,13 @@ def build_spec(
         guards=guards,
         traces=[],
     )
+
+    # Run the smell rule engine over the assembled spec. Loop edges are derived
+    # from resolved call sites (for/while nesting); everything else the rules
+    # need is already on the spec (markers, transactions, guards).
+    loop_edges = {
+        (re.caller_id, re.callee_id) for re in resolved_edges if re.in_loop
+    }
+    run_rules(spec, loop_edges)
+
+    return spec

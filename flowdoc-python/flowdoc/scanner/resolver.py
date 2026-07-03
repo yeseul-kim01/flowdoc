@@ -29,6 +29,7 @@ class ResolvedEdge:
     resolution: str   # "concrete" | "single-impl"
     file: str
     line: int
+    in_loop: bool = False  # the originating call site sits inside a loop
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +205,7 @@ def resolve_call_sites(
                 resolution=resolution,
                 file=str(cs.file),
                 line=cs.line,
+                in_loop=cs.in_loop,
             ))
 
     return resolved, n_ambiguous, n_external

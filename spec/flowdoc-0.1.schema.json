@@ -184,7 +184,27 @@
               "covers": { "type": "array", "items": { "type": "string" } }
             }
           }
+        },
+        "smells": {
+          "type": "array",
+          "description": "Structural smells detected on this sequence's call tree by the rule engine, derived purely from existing markers (data access, transactions, guards). Optional and additive — absent when the sequence is clean.",
+          "items": { "$ref": "#/$defs/smell" }
         }
+      }
+    },
+    "smell": {
+      "type": "object",
+      "required": ["rule", "nodeId", "severity", "message"],
+      "description": "A single structural smell attached to a sequence, anchored on the offending node.",
+      "properties": {
+        "rule": {
+          "type": "string",
+          "description": "Rule identifier.",
+          "examples": ["tx_outside_write", "query_in_loop", "unguarded_shared_write"]
+        },
+        "nodeId": { "type": "string", "description": "Id of the node the smell is anchored on." },
+        "severity": { "type": "string", "enum": ["warn", "error"] },
+        "message": { "type": "string", "description": "Human-readable explanation." }
       }
     },
     "trace": {
