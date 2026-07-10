@@ -134,6 +134,40 @@
     padding:6px 8px;cursor:pointer}
   .trace-actions button:hover{border-color:var(--line)}
 
+  /* ---- sequence lens (0002) ---- */
+  .lens-toggle{display:inline-flex;gap:0;margin-top:14px;border:1px solid var(--border);
+    border-radius:8px;overflow:hidden;background:var(--bg)}
+  .lens-toggle button{font-family:var(--sans);font-size:12.5px;font-weight:500;color:var(--muted);
+    background:transparent;border:0;padding:7px 16px;cursor:pointer}
+  .lens-toggle button.active{background:var(--accent);color:#fff}
+  .seq-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;
+    font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .seq-legend span::before{content:"";display:inline-block;width:16px;height:0;vertical-align:middle;
+    margin-right:5px}
+  .seq-legend .l-obs::before{border-top:2px solid var(--accent)}
+  .seq-legend .l-async::before{border-top:2px dashed var(--async)}
+  .seq-legend .l-unobs::before{border-top:0;width:9px;height:9px;border-radius:3px;background:#EEF0F3;
+    border:1px solid #CDD3DC;vertical-align:-1px}
+  .seq-legend .l-err::before{border-top:2px solid var(--sem)}
+  .seqwrap{overflow-x:auto;padding:8px 4px 4px}
+  .seqsvg{display:block}
+  .seqsvg .lifeline{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
+  .seqsvg .phead rect{fill:var(--surface);stroke:var(--border);stroke-width:1}
+  .seqsvg .phead text{font-family:var(--sans);font-size:12.5px;font-weight:600;fill:var(--ink)}
+  .seqsvg .phead.actor rect{fill:var(--accent-soft);stroke:var(--accent-soft)}
+  .seqsvg .phead.actor text{fill:var(--accent-ink)}
+  .seqsvg .act{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1}
+  .seqsvg .act.err{fill:var(--sem-bg);stroke:var(--sem)}
+  .seqsvg .msg{stroke:var(--accent);stroke-width:1.5}
+  .seqsvg .msg.ret{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 4}
+  .seqsvg .msg.async{stroke:var(--async);stroke-dasharray:5 4}
+  .seqsvg .msg.err{stroke:var(--sem);stroke-width:1.5;stroke-dasharray:0}
+  .seqsvg .mlabel{font-family:var(--mono);font-size:11.5px;fill:var(--ink)}
+  .seqsvg .mlabel.err{fill:var(--sem);font-weight:600}
+  .seqsvg .note{fill:#EEF0F3;stroke:#CDD3DC;stroke-width:1;stroke-dasharray:3 3}
+  .seqsvg .notetx{font-family:var(--mono);font-size:10.5px;fill:#56627A}
+  .seq-empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:20px 4px}
+
   .tx-group{position:relative;margin-left:22px;padding-left:20px;
     border-left:2px solid var(--tx-line);display:flex;flex-direction:column;gap:8px;
     padding-top:4px;padding-bottom:4px;margin-top:8px}
@@ -217,7 +251,9 @@ const ENTRY_ANNS = new Set([...Object.keys(VERB),
 
 const state = { spec:null, nodesById:{}, adjacency:{}, guardsById:{}, seqIndex:0,
   // runtime overlay (v0.3): recorded traces + the currently replayed one
-  traces:[], traceIndex:null, traveledNodes:null, traceTiming:null, traceError:null };
+  traces:[], traceIndex:null, traveledNodes:null, traceTiming:null, traceError:null,
+  // sequence lens (0002): "tree" call hierarchy | "sequence" from the selected trace
+  lens:"tree" };
 
 /* ---------------- loading ---------------- */
 
@@ -531,6 +567,144 @@ function renderTreeNode(tn, isEntry, inTx, inherited){
   return html;
 }
 
+/* ---------------- sequence lens (0002) ---------------- */
+// A recorded trace already carries sequence-diagram data: spans give order (tEnter),
+// caller (parent), participant (nodeId owner) and thread. We render it directly — an
+// execution-verified, always-fresh sequence diagram — keeping the overlay's honesty:
+// unobserved calls (repo/external/self) have no span, so we never draw them as real
+// arrows; we mark them with a "관측 밖" note instead.
+
+const spanSeqNo = id => parseInt(String(id).replace(/^s/, ""), 10) || 0;
+
+// Participant name for a span: the scanner's short owner when the node is known.
+function spanOwner(nodeId){
+  const n = state.nodesById[nodeId];
+  if(n && n.owner) return n.owner;
+  const fqn = idOwner(nodeId);
+  return fqn.split(".").pop() || fqn;
+}
+// "method(Type,Type)" message label, straight from the node id (already simplified).
+function spanSig(nodeId){ return (nodeId.split("#")[1]) || nodeId; }
+
+// Calls this frame makes that the agent can't observe (repo/external/self-invocation):
+// they have no span, so the sequence notes them rather than inventing an arrow.
+function unobservedCallees(nodeId){
+  const names = [];
+  for(const e of (state.adjacency[nodeId] || [])){
+    const child = state.nodesById[e.to];
+    const method = ((e.to.split("#")[1]) || "").split("(")[0] || e.to;
+    const selfCall = idOwner(e.to) === idOwner(nodeId);
+    if(!child || isUnobservable(child) || selfCall) names.push(method);
+  }
+  return [...new Set(names)];
+}
+
+function spanForest(spans){
+  const byId = {}; spans.forEach(s => byId[s.id] = s);
+  const kids = {}; const roots = [];
+  spans.slice().sort((a,b) => spanSeqNo(a.id) - spanSeqNo(b.id)).forEach(s => {
+    if(s.parent && byId[s.parent]) (kids[s.parent] = kids[s.parent] || []).push(s);
+    else roots.push(s);
+  });
+  Object.values(kids).forEach(a => a.sort((x,y) => spanSeqNo(x.id) - spanSeqNo(y.id)));
+  return { byId, kids, roots };
+}
+
+function renderSequence(trace){
+  const spans = (trace && trace.spans) || [];
+  if(!spans.length) return `<div class="seq-empty">이 트레이스에 span이 없습니다.</div>`;
+  const { byId, kids, roots } = spanForest(spans);
+
+  // Exception path: the error span and its ancestors, drawn with --x returns.
+  const errorPath = new Set();
+  if(trace.errorSpanId){
+    let cur = byId[trace.errorSpanId];
+    while(cur){ errorPath.add(cur.id); cur = cur.parent ? byId[cur.parent] : null; }
+  }
+
+  const participants = ["요청"];
+  const pIndex = { "요청": 0 };
+  const addOwner = o => { if(!(o in pIndex)){ pIndex[o] = participants.length; participants.push(o); } };
+  const rootThread = roots[0] && roots[0].thread;
+
+  const rows = [];   // {kind:'call'|'return'|'note', ...}
+  const acts = [];   // activation bars {p,y0,y1,err}
+  function walk(span, callerIdx){
+    const owner = spanOwner(span.nodeId);
+    addOwner(owner);
+    const to = pIndex[owner];
+    const async = !!(span.thread && rootThread && span.thread !== rootThread);
+    const err = errorPath.has(span.id);
+    const y0 = rows.length;
+    rows.push({ kind:"call", from:callerIdx, to, label:spanSig(span.nodeId), err, async });
+    (kids[span.id] || []).forEach(c => walk(c, to));
+    const uc = unobservedCallees(span.nodeId);
+    if(uc.length) rows.push({ kind:"note", p:to, text:"관측 밖: " + uc.slice(0,3).join(", ") + (uc.length>3 ? " …" : "") });
+    const y1 = rows.length;
+    rows.push({ kind:"return", from:to, to:callerIdx, err, async });
+    acts.push({ p:to, y0, y1, err });
+  }
+  roots.forEach(r => walk(r, 0));
+
+  const COL = 178, PADX = 26, HEAD = 58, ROW = 30, TOP = HEAD + 16;
+  const laneX = i => PADX + i * COL + COL / 2;
+  const W = PADX * 2 + participants.length * COL;
+  const H = TOP + rows.length * ROW + 24;
+  const rowY = r => TOP + r * ROW + ROW / 2;
+
+  let s = `<svg class="seqsvg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="sequence diagram">`;
+  s += `<defs>`
+    + `<marker id="ah" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--accent)"/></marker>`
+    + `<marker id="ahx" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--sem)"/></marker>`
+    + `<marker id="aha" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--async)"/></marker>`
+    + `</defs>`;
+
+  participants.forEach((p,i) => {
+    const x = laneX(i);
+    s += `<line class="lifeline" x1="${x}" y1="${HEAD}" x2="${x}" y2="${H-8}"/>`;
+    s += `<g class="phead${i===0 ? " actor" : ""}"><rect x="${x-COL/2+14}" y="14" width="${COL-28}" height="32" rx="8"/>`
+       + `<text x="${x}" y="35" text-anchor="middle">${esc(p)}</text></g>`;
+  });
+
+  acts.forEach(a => {
+    const x = laneX(a.p), y0 = rowY(a.y0), y1 = rowY(a.y1);
+    s += `<rect class="act${a.err ? " err" : ""}" x="${x-5}" y="${y0}" width="10" height="${Math.max(7, y1-y0)}" rx="2"/>`;
+  });
+
+  rows.forEach((r, idx) => {
+    const y = rowY(idx);
+    if(r.kind === "note"){
+      const x = laneX(r.p);
+      const w = Math.min(COL-30, 16 + r.text.length * 6);
+      s += `<rect class="note" x="${x+9}" y="${y-9}" width="${w}" height="18" rx="5"/>`
+         + `<text class="notetx" x="${x+15}" y="${y+3.5}">${esc(r.text)}</text>`;
+      return;
+    }
+    if(r.kind === "return" && r.async) return;    // async is fire-and-forget: no return arrow
+    const x1 = laneX(r.from), x2 = laneX(r.to);
+    if(x1 === x2) return;
+    const dir = x2 > x1 ? 1 : -1;
+    const cls = r.kind === "call"
+      ? "msg call" + (r.err ? " err" : r.async ? " async" : "")
+      : "msg ret" + (r.err ? " err" : "");
+    const marker = r.err ? "ahx" : (r.kind === "call" && r.async ? "aha" : "ah");
+    s += `<line class="${cls}" x1="${x1 + dir*5}" y1="${y}" x2="${x2 - dir*5}" y2="${y}" marker-end="url(#${marker})"/>`;
+    if(r.kind === "call"){
+      s += `<text class="mlabel${r.err ? " err" : ""}" x="${(x1+x2)/2}" y="${y-6}" text-anchor="middle">${esc(r.label)}</text>`;
+    } else if(r.err && r.to === 0){
+      s += `<text class="mlabel err" x="${(x1+x2)/2}" y="${y-6}" text-anchor="middle">✕ ${esc(trace.error || "error")}</text>`;
+    }
+  });
+
+  s += `</svg>`;
+  const legend = `<div class="seq-legend">`
+    + `<span class="l-obs">관측된 호출</span><span class="l-async">async (다른 스레드)</span>`
+    + `<span class="l-unobs">관측 밖 (repo·external·self)</span>`
+    + (trace.error ? `<span class="l-err">실패</span>` : "")
+    + `</div>`;
+  return legend + `<div class="seqwrap">${s}</div>`;
+}
+
 /* ---------------- rendering: shells ---------------- */
 
 function render(){
@@ -574,11 +748,23 @@ function render(){
     ? `<div class="${flowCls}">${renderTreeNode(tree, true, false, "")}</div>`
     : `<p class="seq-desc">진입 노드 <code>${esc(seq.entry)}</code> 를 스펙에서 찾지 못했습니다.</p>`;
 
+  // Sequence lens is trace-driven: only offered while a recorded trace is replayed.
+  const hasTrace = state.traceIndex != null && state.traveledNodes;
+  const lens = hasTrace ? state.lens : "tree";
+  const lensToggle = hasTrace
+    ? `<div class="lens-toggle">`
+      + `<button data-lens="tree" class="${lens==="tree"?"active":""}">콜 트리</button>`
+      + `<button data-lens="sequence" class="${lens==="sequence"?"active":""}">시퀀스</button></div>`
+    : "";
+  const bodyHtml = (lens === "sequence")
+    ? renderSequence(state.traces[state.traceIndex])
+    : flowHtml;
+
   app.innerHTML = sidebarHtml(seqs) +
     `<main class="main">`
     + `<div class="seq-head">${routeHtml}<h1 class="seq-title">${esc(title)}</h1>`
-    + `<p class="seq-desc">${esc(desc)}</p></div>`
-    + flowHtml
+    + `<p class="seq-desc">${esc(desc)}</p>${lensToggle}</div>`
+    + bodyHtml
     + `</main>`;
   wireUp();
 }
@@ -711,6 +897,9 @@ function wireUp(){
   if(lb) lb.addEventListener("click", () => document.getElementById("filein").click());
   document.querySelectorAll(".trace-item").forEach(btn => {
     btn.addEventListener("click", () => selectTrace(parseInt(btn.dataset.trace, 10)));
+  });
+  document.querySelectorAll(".lens-toggle button").forEach(btn => {
+    btn.addEventListener("click", () => { state.lens = btn.dataset.lens; render(); });
   });
   const tc = document.getElementById("trace-clear");
   if(tc) tc.addEventListener("click", clearTrace);

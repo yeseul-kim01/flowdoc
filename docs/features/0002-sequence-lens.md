@@ -1,6 +1,8 @@
 # 0002 — 시퀀스 렌즈 (트레이스 → 시퀀스 다이어그램 + Mermaid export)
 
-- **상태**: 🔄 계획 (추후 개발)
+- **상태**: 🚧 진행 — Phase 1 ✅ (인앱 시퀀스 뷰), Phase 2/3 대기
+- **이슈**: [#10](https://github.com/yeseul-kim01/flowdoc/issues/10)
+- **브랜치**: `feat/sequence-lens`
 - **로드맵**: v0.3+ (0001 런타임 오버레이 위에 얹는 뷰). 기획안 §10 "트레이스 뷰"의 확장.
 - **백로그**: ideas.md A 계열(그래프 렌즈) — 등급 ✅ **스펙 그대로**(스캐너 0수정, UI만).
 - **브랜치**: `feat/sequence-lens` (미정)
@@ -83,8 +85,12 @@ sequenceDiagram
 
 ## 단계 분할
 
-- **Phase 1 — 인앱 시퀀스 뷰:** 선택한 트레이스를 시퀀스 다이어그램으로 렌더(참가자/메시지/activation,
-  실패 `--x`). 콜 트리 ↔ 시퀀스 토글. 관측 밖은 Note로 정직 표기. (UI만, 스펙 0수정)
+- **Phase 1 — 인앱 시퀀스 뷰 ✅:** 선택한 트레이스를 SVG 시퀀스로 렌더 — 참가자(요청 actor + span owner,
+  최초 등장 순), 메시지(`tEnter` 순 call/return), activation bar, 실패 `✕`(에러 경로 span + 예외 메시지).
+  seq-head에 **콜 트리 ↔ 시퀀스 토글**(트레이스 선택 시에만). 관측 밖(repo·external·self)은 `adjacency`로
+  찾아 **회색 Note로 정직 표기**(실선 화살표 날조 안 함). async span은 다른 `thread`면 **점선 화살표**(0001
+  Phase 2 스티칭 머지되면 실선 async 메시지로 표시). **`ui/`만, 스펙·스캐너 0수정.** node `--check` +
+  stub 로직테스트(참가자/async/Note/에러 `--x`)로 검증, 라이브 `/flowdoc` 서빙 확인.
 - **Phase 2 — Mermaid export:** `sequenceDiagram` 텍스트 생성 + 복사/다운로드. GitHub PR·Confluence에
   붙여 렌더 확인. 참가자 alias·escape·truncation 처리.
 - **Phase 3 — 리치 표현:** tx 박스, async 병렬 lifeline(0001 Phase 2 스레드홉 의존), 리턴 화살표 토글.
