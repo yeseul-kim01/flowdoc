@@ -195,6 +195,16 @@
 
   .node.impact-path{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
   .node.impact-target{border-width:2px;border-style:solid}
+
+  /* sidebar-top visibility: smell summary teaser + per-sequence smell count */
+  .smell-summary{all:unset;display:block;cursor:pointer;width:100%;box-sizing:border-box;
+    margin-top:10px;font-family:var(--mono);font-size:11.5px;font-weight:600;color:#8A6D00;
+    background:#FBF1D2;border-radius:8px;padding:8px 11px}
+  .smell-summary:hover{background:#F7E8B8}
+  .seq-smell-count{font-family:var(--mono);font-size:10.5px;color:var(--sem);margin-left:6px}
+
+  /* subtle "this is clickable" affordance beyond the existing cursor:pointer */
+  .node-head:hover{background:var(--bg)}
 </style>
 </head>
 <body>
@@ -332,6 +342,12 @@ function toggleImpact(nodeId){
   state.impactNodeIds = computeImpactSet(state.impactNodeId);
   applyImpactHighlight();
   renderImpactPanel();
+  // The panel lives near the sidebar top; if the sidebar itself is scrolled down
+  // (e.g. browsing a long sequence list), bring it back into view on selection.
+  if(state.impactNodeId){
+    const panel = document.getElementById("impact-panel");
+    if(panel) panel.scrollIntoView({behavior:"smooth", block:"start"});
+  }
 }
 
 function selectSequence(i){
@@ -591,6 +607,15 @@ function render(){
   wireUp();
 }
 
+function smellSummaryHtml(seq){
+  const smells = (seq && seq.smells) || [];
+  if(!smells.length) return "";
+  const errCount = smells.filter(s => s.severity === "error").length;
+  const warnCount = smells.length - errCount;
+  return `<button class="smell-summary" id="smell-summary-btn">`
+    + `⚠ 스멜 ${smells.length}건 (error ${errCount} · warn ${warnCount})</button>`;
+}
+
 function smellPanelHtml(seq){
   const smells = (seq && seq.smells) || [];
   if(!smells.length) return "";
@@ -607,17 +632,14 @@ function smellPanelHtml(seq){
     return `<div class="smell-group"><div class="smell-rule">${esc(smellLabel(rule))} `
       + `<span class="rule-id">(${esc(rule)})</span><span class="smell-count">${list.length}</span></div>${rows}</div>`;
   }).join("");
-  return `<div class="sb-section-label" style="margin-top:14px">스멜 (${smells.length})</div>${body}`;
+  return `<div class="sb-section-label" style="margin-top:14px" id="smell-panel">스멜 (${smells.length})</div>${body}`;
 }
 
 function impactPanelHtml(){
-  if(!state.impactNodeId){
-    return `<div class="sb-section-label" style="margin-top:14px">영향받는 시퀀스</div>`
-      + `<div class="specbox">노드를 클릭하면 이 노드에 도달하는 시퀀스를 보여줍니다.</div>`;
-  }
+  if(!state.impactNodeId) return "";           // hidden until a node is selected
   const affected = affectedSequences(state.impactNodeId);
   if(!affected.length){
-    return `<div class="sb-section-label" style="margin-top:14px">영향받는 시퀀스</div>`
+    return `<div class="sb-section-label">영향받는 시퀀스</div>`
       + `<div class="specbox">영향 없음 — 이 노드에 도달하는 진입점이 없습니다.</div>`;
   }
   const seqs = (state.spec && state.spec.sequences) || [];
@@ -644,8 +666,10 @@ function sidebarHtml(seqs){
     const en = state.nodesById[s.entry];
     // Neutral trigger label ("GET /x", "Scheduled · cron", "Kafka · topic"); never a framework name.
     const sub = (s.trigger && s.trigger.label) || (en ? `${en.owner||""}.${en.simpleName||""}` : s.entry);
+    const smellCount = (s.smells||[]).length;
+    const countBadge = smellCount ? `<span class="seq-smell-count">⚠${smellCount}</span>` : "";
     return `<button class="seq-item${i===state.seqIndex?" active":""}" data-seq="${i}">`
-         + `<div class="stag">${esc(s.tag)}</div><div class="sentry">${esc(sub)}</div></button>`;
+         + `<div class="stag">${esc(s.tag)}${countBadge}</div><div class="sentry">${esc(sub)}</div></button>`;
   };
   // Preserve each sequence's ORIGINAL index (used by data-seq / state.seqIndex) when grouping.
   const idx = seqs.map((s,i) => [s,i]);
@@ -667,7 +691,10 @@ function sidebarHtml(seqs){
     + `<div><div class="sb-section-label">Spec</div>`
     + `<div class="specbox"><div class="src-meta">${esc(meta||"unknown")}</div>`
     + `<div class="counts">${esc(counts)}</div>`
-    + `<button id="loadbtn">다른 flowdoc.json 열기</button></div></div>`
+    + `<button id="loadbtn">다른 flowdoc.json 열기</button></div>`
+    + smellSummaryHtml(seq)
+    + `</div>`
+    + `<div id="impact-panel">${impactPanelHtml()}</div>`
     + `<div>${seqSection}</div>`
     + `<div><div class="sb-section-label">범례</div><div class="legend">`
     + `<span class="chip"><span class="sw tx"></span>트랜잭션 경계</span>`
@@ -676,7 +703,6 @@ function sidebarHtml(seqs){
     + `<span class="chip"><span class="sw ext"></span>외부 호출</span>`
     + `</div></div>`
     + `<div>${smellPanelHtml(seq)}</div>`
-    + `<div id="impact-panel">${impactPanelHtml()}</div>`
     + `</aside>`;
 }
 
@@ -712,6 +738,11 @@ function wireUp(){
   });
   document.querySelectorAll(".smell-row").forEach(btn => {
     btn.addEventListener("click", () => scrollToNode(btn.dataset.smellNode));
+  });
+  const ssb = document.getElementById("smell-summary-btn");
+  if(ssb) ssb.addEventListener("click", () => {
+    const panel = document.getElementById("smell-panel");
+    if(panel) panel.scrollIntoView({behavior:"smooth", block:"start"});
   });
   const lb = document.getElementById("loadbtn");
   if(lb) lb.addEventListener("click", () => document.getElementById("filein").click());
