@@ -1,6 +1,6 @@
 # 0001 — 런타임 트레이스 오버레이
 
-- **상태**: 🚧 진행 — Phase 1 ✅ (Spring), Phase 2/3 대기
+- **상태**: 🚧 진행 — Phase 1 ✅ (Spring), Phase 2 @Async 스티칭 ✅ / tx 타임라인 ⏸(jch 사인오프 대기), Phase 3 대기
 - **로드맵**: v0.3 (기획안 §14 — "런타임 오버레이")
 - **백로그**: ideas.md ⏱ 등급(런타임) 항목 전반의 기반. 트레이스 뷰는 §10에 UI 방향 확정됨.
 - **브랜치**: `feat/runtime-trace-overlay`
@@ -70,7 +70,14 @@ TransactionSynchronization ─→ tx begin/commit/rollback 타임라인 (Phase 2
   - **트레이스 목록**: 트리거(`GET/POST 경로`) + 결과(OK / ⚠ 에러, 호버 시 예외 타입·메시지). 500과 200을 구분.
   - **오버레이 범례** 추가.
   - **스펙 변경**: `Trace.error`(optional) + 스키마 `trace.error` 추가 → **공유 계약** (collaboration.md). 런타임 전용·additive지만 jch 사인오프 필요(Python 런타임 생기면 동일 필드).
-- **Phase 2:** `TransactionSynchronization` tx 타임라인 + @Async 스레드홉 전파. (스키마 확장 → 공유 계약)
+- **Phase 2:** ([이슈 #9](https://github.com/yeseul-kim01/flowdoc/issues/9))
+  - **@Async 스레드홉 전파 ✅ — Spring (스키마 무변경):** async 자식 span을 **호출자 트레이스에 스티칭**. 핵심 발견 — Spring `@Async` advice가 우리 aspect보다 **바깥(outer)**이라 aspect는 async 메서드를 **워커 스레드에서** 가로챈다. 그래서:
+    1. `TraceRecorder`를 **Accumulator(트레이스 공유)** + **ThreadState(스레드별 스택)**로 재설계. Accumulator 단위로 락 → 호출자·워커 동시 접근 안전.
+    2. `FlowDocTraceTaskDecorator`(`TaskDecorator`)가 제출 스레드에서 호출자 프레임을 스냅샷(`captureAsyncParent`) + 플러시 보류(`armAsync`), 워커에서 링크 설치(`beginAsyncScope`) → 워커의 첫 `enter`가 새 트레이스 대신 **호출자 트레이스를 이어감**.
+    3. **참조카운트 deferred-flush**: 루트가 풀려도 미완 async가 있으면 플러시 보류, 마지막 async 종료 시 플러시(양 순서 안전). 계측 안 된 async는 `cancelAsync`로 arm 해제 → 트레이스 방치 방지.
+    4. **배선 한 줄**: Spring Boot `TaskExecutionAutoConfiguration`이 단일 `TaskDecorator` 빈을 `applicationTaskExecutor`에 자동 적용 → 데코레이터 빈만 등록. (커스텀 executor 앱은 직접 세팅 — 정직한 한계로 문서화.)
+    5. **스키마 무변경**: span의 기존 `parent`+`thread`만 씀 → `ui/` 무변경(공유 계약 안 건드림). coupon-rush E2E: POST 발급 성공 → `NotificationService#notifyIssued`가 **`task-1` 스레드로 같은 트레이스에 붙음**, 에러 경로/동시요청 회귀 없음, `$defs/trace` 통과.
+  - **tx 타임라인 ⏸ — jch 사인오프 대기 (공유 계약):** `TransactionSynchronization` begin/commit/rollback + 실제 propagation. `span.tx[]`(또는 `trace.txEvents[]`) **스키마 확장 = 공유 계약** → 이슈 #9에 초안 올림, jch 합의 후 spec·ui 동시 반영.
 - **Phase 3:** 가드 acquire/release 타이밍, 샘플링/버퍼 설정, **정적↔런타임 괴리 감지**(안 탄 분기 / 정적에 없는 호출).
 
 ## 패리티 (Spring ↔ FastAPI)
