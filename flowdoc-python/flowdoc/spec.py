@@ -130,6 +130,8 @@ class Sequence:
 
     tag: str
     entry: str  # node id of the entry point
+    title: str | None = None
+    description: str | None = None
     source: str = "auto"  # "declared" (@flow_entry) | "auto" (framework annotation)
     trigger: Trigger | None = None
     transactions: list[Any] = field(default_factory=list)

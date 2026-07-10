@@ -81,6 +81,9 @@ class FunctionDef:
     annotations: list[AnnotationInfo] = field(default_factory=list)
     # Optional: docstring first line
     description: Optional[str] = None
+    # Optional: docstring body after the first line (sequence-level description
+    # source — distinct from `description`, which is the node-level summary line)
+    docstring_body: Optional[str] = None
     # Optional: per-parameter descriptions extracted from the docstring body
     param_docs: dict[str, str] = field(default_factory=dict)
     # For local-variable type resolution: {var_name: type_str}
@@ -584,7 +587,10 @@ class _FileVisitor(ast.NodeVisitor):
                 annotations.append(info)
 
         full_doc = _full_docstring(node.body)
-        desc = full_doc.split("\n")[0] if full_doc else None
+        doc_lines = full_doc.split("\n") if full_doc else []
+        desc = doc_lines[0] if doc_lines else None
+        docstring_body = "\n".join(doc_lines[1:]).strip() if len(doc_lines) > 1 else None
+        docstring_body = docstring_body or None
         param_docs = _parse_param_docs(full_doc)
         param_docs = {k: v for k, v in param_docs.items() if any(p.name == k for p in params)}
 
@@ -609,6 +615,7 @@ class _FileVisitor(ast.NodeVisitor):
             return_type=return_type,
             annotations=annotations,
             description=desc,
+            docstring_body=docstring_body,
             param_docs=param_docs,
             local_types=local_types,
             data_access=data_access,

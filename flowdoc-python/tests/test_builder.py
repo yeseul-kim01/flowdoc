@@ -448,3 +448,57 @@ def test_transaction_marker_serialized_to_wire(tmp_path: Path) -> None:
     node = next(n for n in d["nodes"] if n["simpleName"] == "save")
     assert node["markers"]["transaction"] == {"boundary": "open"}
     assert node["markers"]["dataAccess"] == "write"
+
+
+# ---------------------------------------------------------------------------
+# sequence.title / sequence.description
+# ---------------------------------------------------------------------------
+
+def test_sequence_title_from_route_summary_kwarg(tmp_path: Path) -> None:
+    """summary= on the route decorator wins over the docstring first line."""
+    spec = _scan(tmp_path, ("api.py", """
+        from fastapi import APIRouter
+        router = APIRouter()
+
+        @router.post("/coupons", summary="Issue a coupon")
+        def issue() -> dict:
+            \"\"\"Handles coupon issuance.
+
+            Reserves stock, saves the issuance, then logs the attempt.
+            \"\"\"
+            return {}
+    """))
+    seq = next(s for s in spec.sequences if "POST" in s.tag)
+    assert seq.title == "Issue a coupon"
+    assert seq.description == "Reserves stock, saves the issuance, then logs the attempt."
+
+
+def test_sequence_title_falls_back_to_docstring_first_line(tmp_path: Path) -> None:
+    """No summary= kwarg -> title falls back to the docstring's first line."""
+    spec = _scan(tmp_path, ("api.py", """
+        from fastapi import APIRouter
+        router = APIRouter()
+
+        @router.get("/ping")
+        def ping() -> dict:
+            \"\"\"Health check endpoint.\"\"\"
+            return {}
+    """))
+    seq = next(s for s in spec.sequences if "GET" in s.tag)
+    assert seq.title == "Health check endpoint."
+    assert seq.description is None
+
+
+def test_sequence_title_and_description_none_without_docstring_or_summary(tmp_path: Path) -> None:
+    """Neither summary= nor a docstring -> both fields stay None (additive-optional)."""
+    spec = _scan(tmp_path, ("api.py", """
+        from fastapi import APIRouter
+        router = APIRouter()
+
+        @router.get("/ping")
+        def ping() -> dict:
+            return {}
+    """))
+    seq = next(s for s in spec.sequences if "GET" in s.tag)
+    assert seq.title is None
+    assert seq.description is None

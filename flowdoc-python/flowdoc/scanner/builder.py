@@ -242,6 +242,24 @@ def _trigger_for(
     return None
 
 
+def _sequence_title_and_description(defn: FunctionDef) -> tuple[str | None, str | None]:
+    """Derive a sequence's title/description from its entry function.
+
+    Distinct from the *node*-level ``declared.description`` (always the
+    docstring's first line): title prefers the route decorator's ``summary=``
+    kwarg (FastAPI/Java parity), falling back to that same first line;
+    description is the docstring body *after* the first line, so the two
+    fields don't just duplicate one another.
+    """
+    summary: str | None = None
+    for ann in defn.annotations:
+        if "summary" in ann.attributes:
+            summary = ann.attributes["summary"].strip("\"'") or None
+            break
+    title = summary or defn.description
+    return title, defn.docstring_body
+
+
 def _extract_sequences(
     parsed_files: list[ParsedFile],
     prefix_map: dict[tuple[str, str], str],
@@ -278,9 +296,12 @@ def _extract_sequences(
                     or defn.simple_name
                 )
                 tag = tag.strip("\"'")
+                title, description = _sequence_title_and_description(defn)
                 declared_seqs.append(Sequence(
                     tag=tag,
                     entry=defn.node_id,
+                    title=title,
+                    description=description,
                     source="declared",
                     trigger=_trigger_for(defn, pf.module_path, prefix_map),
                 ))
@@ -293,9 +314,12 @@ def _extract_sequences(
             # ── framework triggers (http / websocket / scheduled / event / messaging) ──
             trigger = _trigger_for(defn, pf.module_path, prefix_map)
             if trigger is not None:
+                title, description = _sequence_title_and_description(defn)
                 auto_seqs.append(Sequence(
                     tag=trigger.label or defn.simple_name,
                     entry=defn.node_id,
+                    title=title,
+                    description=description,
                     source="auto",
                     trigger=trigger,
                 ))
