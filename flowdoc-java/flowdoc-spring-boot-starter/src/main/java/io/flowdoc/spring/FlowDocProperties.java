@@ -15,6 +15,12 @@ public class FlowDocProperties {
     /** Where the prebuilt spec lives. Any Spring resource location works. */
     private String specLocation = "classpath:flowdoc.json";
 
+    /** Whether the runtime overlay (AOP trace agent) is active. */
+    private boolean tracing = true;
+
+    /** How many recent traces the in-memory ring buffer keeps. */
+    private int maxTraces = 50;
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -37,5 +43,21 @@ public class FlowDocProperties {
 
     public void setSpecLocation(String specLocation) {
         this.specLocation = specLocation;
+    }
+
+    public boolean isTracing() {
+        return tracing;
+    }
+
+    public void setTracing(boolean tracing) {
+        this.tracing = tracing;
+    }
+
+    public int getMaxTraces() {
+        return maxTraces;
+    }
+
+    public void setMaxTraces(int maxTraces) {
+        this.maxTraces = maxTraces;
     }
 }

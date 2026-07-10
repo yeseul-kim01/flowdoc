@@ -1,1 +1,2 @@
 io.flowdoc.spring.FlowDocAutoConfiguration
+io.flowdoc.spring.FlowDocRuntimeAutoConfiguration

@@ -4,7 +4,12 @@
   "title": "FlowDoc shared spec",
   "description": "Language-neutral description of internal call flows. Single source of truth produced by collectors (static scanner, runtime agent) and consumed by the FlowDoc UI. See docs/flowdoc-기획안.md §8.",
   "type": "object",
-  "required": ["flowdoc", "source", "nodes", "edges"],
+  "required": [
+    "flowdoc",
+    "source",
+    "nodes",
+    "edges"
+  ],
   "properties": {
     "flowdoc": {
       "type": "string",
@@ -13,52 +18,104 @@
     },
     "source": {
       "type": "object",
-      "required": ["language", "collector"],
+      "required": [
+        "language",
+        "collector"
+      ],
       "properties": {
-        "language": { "type": "string", "examples": ["java", "python"] },
-        "framework": { "type": "string", "examples": ["spring-boot"] },
-        "collector": { "type": "string", "enum": ["static", "runtime"] }
+        "language": {
+          "type": "string",
+          "examples": [
+            "java",
+            "python"
+          ]
+        },
+        "framework": {
+          "type": "string",
+          "examples": [
+            "spring-boot"
+          ]
+        },
+        "collector": {
+          "type": "string",
+          "enum": [
+            "static",
+            "runtime"
+          ]
+        }
       }
     },
     "nodes": {
       "type": "array",
-      "items": { "$ref": "#/$defs/node" }
+      "items": {
+        "$ref": "#/$defs/node"
+      }
     },
     "edges": {
       "type": "array",
-      "items": { "$ref": "#/$defs/edge" }
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
     },
     "guards": {
       "type": "array",
-      "items": { "$ref": "#/$defs/guard" }
+      "items": {
+        "$ref": "#/$defs/guard"
+      }
     },
     "sequences": {
       "type": "array",
-      "items": { "$ref": "#/$defs/sequence" }
+      "items": {
+        "$ref": "#/$defs/sequence"
+      }
     },
     "traces": {
       "type": "array",
-      "items": { "$ref": "#/$defs/trace" }
+      "items": {
+        "$ref": "#/$defs/trace"
+      }
     }
   },
   "$defs": {
     "node": {
       "type": "object",
-      "required": ["id", "kind"],
+      "required": [
+        "id",
+        "kind"
+      ],
       "properties": {
         "id": {
           "type": "string",
           "description": "Stable identity, e.g. com.shop.OrderService#createOrder(CreateOrderCommand)."
         },
-        "simpleName": { "type": "string" },
-        "owner": { "type": "string", "description": "Declaring type's simple name." },
-        "kind": { "type": "string", "examples": ["method"] },
+        "simpleName": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Declaring type's simple name."
+        },
+        "kind": {
+          "type": "string",
+          "examples": [
+            "method"
+          ]
+        },
         "location": {
           "type": "object",
           "properties": {
-            "file": { "type": "string" },
-            "line": { "type": "integer" },
-            "module": { "type": ["string", "null"] }
+            "file": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer"
+            },
+            "module": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         },
         "auto": {
@@ -70,49 +127,93 @@
               "items": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string" },
-                  "type": { "type": "string" }
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
                 }
               }
             },
             "returns": {
-              "type": ["object", "null"],
-              "properties": { "type": { "type": "string" } }
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string"
+                }
+              }
             },
             "annotations": {
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string" },
-                  "attributes": { "type": "object", "additionalProperties": { "type": "string" } }
+                  "name": {
+                    "type": "string"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
           }
         },
         "declared": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "description": "Authored by the developer (annotations / Javadoc).",
           "properties": {
-            "description": { "type": "string" },
-            "paramDocs": { "type": "object", "additionalProperties": { "type": "string" } }
+            "description": {
+              "type": "string"
+            },
+            "paramDocs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
           }
         },
         "markers": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "properties": {
             "transaction": {
               "type": "object",
               "properties": {
-                "boundary": { "type": "string", "enum": ["open"] },
-                "propagation": { "type": ["string", "null"] }
+                "boundary": {
+                  "type": "string",
+                  "enum": [
+                    "open"
+                  ]
+                },
+                "propagation": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
               }
             },
             "dataAccess": {
               "type": "string",
               "description": "For data-boundary nodes (repositories, …): whether the call reads or writes. A write reached outside a transaction is an atomicity smell.",
-              "enum": ["read", "write"]
+              "enum": [
+                "read",
+                "write"
+              ]
             }
           }
         }
@@ -120,59 +221,150 @@
     },
     "edge": {
       "type": "object",
-      "required": ["from", "to", "callType", "resolution"],
+      "required": [
+        "from",
+        "to",
+        "callType",
+        "resolution"
+      ],
       "properties": {
-        "from": { "type": "string" },
-        "to": { "type": "string" },
-        "callType": { "type": "string", "enum": ["sync", "async", "event"] },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "callType": {
+          "type": "string",
+          "enum": [
+            "sync",
+            "async",
+            "event"
+          ]
+        },
         "site": {
           "type": "object",
           "properties": {
-            "file": { "type": "string" },
-            "line": { "type": "integer" }
+            "file": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer"
+            }
           }
         },
-        "condition": { "type": ["string", "null"] },
+        "condition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "resolution": {
           "type": "string",
-          "enum": ["concrete", "single-impl", "ambiguous", "runtime-confirmed"]
+          "enum": [
+            "concrete",
+            "single-impl",
+            "ambiguous",
+            "runtime-confirmed"
+          ]
         }
       }
     },
     "guard": {
       "type": "object",
-      "required": ["nodeId", "type", "resource"],
+      "required": [
+        "nodeId",
+        "type",
+        "resource"
+      ],
       "properties": {
-        "nodeId": { "type": "string" },
-        "type": { "type": "string", "enum": ["semaphore", "lock"] },
-        "resource": { "type": "string" },
-        "permits": { "type": "integer" },
-        "source": { "type": "string", "enum": ["declared", "auto"] }
+        "nodeId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "semaphore",
+            "lock"
+          ]
+        },
+        "resource": {
+          "type": "string"
+        },
+        "permits": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "declared",
+            "auto"
+          ]
+        }
       }
     },
     "sequence": {
       "type": "object",
-      "required": ["tag", "entry"],
+      "required": [
+        "tag",
+        "entry"
+      ],
       "properties": {
-        "tag": { "type": "string" },
-        "title": { "type": ["string", "null"] },
-        "entry": { "type": "string" },
-        "description": { "type": ["string", "null"] },
+        "tag": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entry": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "source": {
           "type": "string",
           "description": "How this entry was identified: explicitly declared (@FlowEntry) or auto-detected from a standard trigger annotation (@*Mapping, @Scheduled, @KafkaListener, …).",
-          "enum": ["declared", "auto"]
+          "enum": [
+            "declared",
+            "auto"
+          ]
         },
         "trigger": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "description": "Language-neutral description of how the flow is entered. Each collector maps its framework onto this; the UI renders from kind/label, never from framework annotation names.",
           "properties": {
             "kind": {
               "type": "string",
-              "enum": ["http", "scheduled", "messaging", "event", "websocket"]
+              "enum": [
+                "http",
+                "scheduled",
+                "messaging",
+                "event",
+                "websocket"
+              ]
             },
-            "label": { "type": ["string", "null"] },
-            "detail": { "type": "object", "additionalProperties": { "type": "string" } }
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "detail": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
           }
         },
         "transactions": {
@@ -180,8 +372,15 @@
           "items": {
             "type": "object",
             "properties": {
-              "owner": { "type": "string" },
-              "covers": { "type": "array", "items": { "type": "string" } }
+              "owner": {
+                "type": "string"
+              },
+              "covers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             }
           }
         },
@@ -209,23 +408,67 @@
     },
     "trace": {
       "type": "object",
-      "required": ["traceId", "sequenceTag", "spans"],
+      "required": [
+        "traceId",
+        "sequenceTag",
+        "spans"
+      ],
       "properties": {
-        "traceId": { "type": "string" },
-        "sequenceTag": { "type": "string" },
+        "traceId": {
+          "type": "string"
+        },
+        "sequenceTag": {
+          "type": "string"
+        },
         "spans": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "id": { "type": "string" },
-              "nodeId": { "type": "string" },
-              "parent": { "type": ["string", "null"] },
-              "tEnter": { "type": ["integer", "null"] },
-              "tExit": { "type": ["integer", "null"] },
-              "thread": { "type": ["string", "null"] }
+              "id": {
+                "type": "string"
+              },
+              "nodeId": {
+                "type": "string"
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tEnter": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "tExit": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "thread": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
           }
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "errorSpanId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

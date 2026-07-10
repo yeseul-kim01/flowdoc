@@ -107,6 +107,32 @@
   .b-cycle{background:#F0ECFB;color:var(--accent-ink)}
   .b-write{background:#E8F1EA;color:#2E7D46}
   .b-warn{background:var(--sem-bg);color:var(--sem);font-weight:600}
+  .b-trace{background:var(--accent);color:#fff;font-weight:600}
+
+  /* ---- runtime trace overlay ---- */
+  /* observed = actually executed; unobs = ran but AOP can't see (repo/external/self-call);
+     nottaken = instrumentable but the request didn't go there. */
+  .node.traveled{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+  .flow.has-trace .node.nottaken{opacity:.35}
+  .flow.has-trace .node.unobs{opacity:1;border-style:dashed}
+  .b-unobs{background:#EEF0F3;color:#56627A}
+  .b-err{background:var(--sem);color:#fff}
+  .sw.tr{background:var(--accent)} .sw.unobs{background:#9AA3B2} .sw.skip{background:#CDD3DC}
+  .sw.err{background:var(--sem)}
+  /* the failure frame: deepest OBSERVED span the exception passed through */
+  .node.errnode{border-color:var(--sem);box-shadow:inset 3px 0 0 var(--sem)}
+  .flow.has-trace .node.errnode{opacity:1}
+  .err-strip{font-family:var(--mono);font-size:11.5px;color:var(--sem);background:var(--sem-bg);
+    padding:8px 16px 8px 40px;border-top:1px solid #F0CdD2;line-height:1.5}
+  .err-strip .where{color:var(--muted)}
+  .trace-item .stag{color:var(--accent-ink)}
+  .trace-item.active{border-color:var(--accent);background:var(--accent-soft)}
+  .trace-meta{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:3px}
+  .trace-actions{display:flex;gap:6px;margin-top:8px}
+  .trace-actions button{flex:1;font-family:var(--sans);font-size:11.5px;font-weight:500;
+    background:var(--bg);color:var(--muted);border:1px solid var(--border);border-radius:7px;
+    padding:6px 8px;cursor:pointer}
+  .trace-actions button:hover{border-color:var(--line)}
 
   .tx-group{position:relative;margin-left:22px;padding-left:20px;
     border-left:2px solid var(--tx-line);display:flex;flex-direction:column;gap:8px;
@@ -224,7 +250,10 @@ const VERB = {
 const ENTRY_ANNS = new Set([...Object.keys(VERB),
   "KafkaListener","RabbitListener","JmsListener","EventListener","Scheduled","MessageMapping"]);
 
-const state = { spec:null, nodesById:{}, adjacency:{}, guardsById:{}, seqIndex:0, impactNodeId:null, impactNodeIds:null, currentTree:null };
+const state = { spec:null, nodesById:{}, adjacency:{}, guardsById:{}, seqIndex:0,
+  impactNodeId:null, impactNodeIds:null, currentTree:null,
+  // runtime overlay (v0.3): recorded traces + the currently replayed one
+  traces:[], traceIndex:null, traveledNodes:null, traceTiming:null, traceError:null };
 
 /* ---------------- loading ---------------- */
 
@@ -238,6 +267,9 @@ function indexSpec(spec){
   state.spec = spec; state.nodesById = nodesById;
   state.adjacency = adjacency; state.guardsById = guardsById; state.seqIndex = 0;
   state.impactNodeId = null; state.impactNodeIds = null;
+  // A freshly indexed spec drops any active trace replay (the node ids may differ).
+  state.traceIndex = null; state.traveledNodes = null; state.traceTiming = null;
+  state.traceError = null;
 }
 
 function loadSpec(spec){
@@ -254,16 +286,69 @@ async function tryAutoLoad(){
   try{
     const res = await fetch(url, {cache:"no-store"});
     if(!res.ok) throw new Error(res.status);
-    loadSpec(await res.json());
+    indexSpec(await res.json());
+    await loadTraces();           // best-effort runtime overlay; ok if absent
+    loadSpec(state.spec);
   }catch(e){
     renderEmpty();
   }
 }
 
+// Runtime overlay: the live starter serves recorded traces beside the spec.
+// Loading a spec from a file leaves this empty — the structure view stands alone.
+async function loadTraces(){
+  try{
+    const res = await fetch("./traces.json", {cache:"no-store"});
+    if(!res.ok) throw new Error(res.status);
+    const traces = await res.json();
+    state.traces = Array.isArray(traces) ? traces : [];
+  }catch(e){
+    state.traces = [];
+  }
+}
+
+function selectTrace(i){
+  const t = state.traces[i];
+  if(!t){ clearTrace(); return; }
+  state.traceIndex = i;
+  state.traveledNodes = new Set(t.spans.map(s => s.nodeId));
+  // Sum observed duration per node (a node may recur across spans).
+  const timing = {};
+  for(const s of t.spans){
+    if(s.tEnter != null && s.tExit != null){
+      timing[s.nodeId] = (timing[s.nodeId] || 0) + (s.tExit - s.tEnter);
+    }
+  }
+  state.traceTiming = timing;
+  // Localize the failure: errorSpanId points at the deepest observed span the
+  // exception passed through; map it back to its node to highlight on the graph.
+  state.traceError = null;
+  if(t.error){
+    const span = t.spans.find(s => s.id === t.errorSpanId);
+    state.traceError = { nodeId: span ? span.nodeId : null, message: t.error };
+  }
+  // Focus the sequence this trace actually entered, if one matches.
+  const si = (state.spec.sequences||[]).findIndex(s => s.entry === t.sequenceTag);
+  if(si >= 0) state.seqIndex = si;
+  render();
+}
+
+function clearTrace(){
+  state.traceIndex = null; state.traveledNodes = null; state.traceTiming = null;
+  state.traceError = null;
+  render();
+}
+
+async function refreshTraces(){
+  await loadTraces();
+  if(state.traceIndex != null && state.traceIndex >= state.traces.length) clearTrace();
+  else render();
+}
+
 function loadFromFile(file){
   const reader = new FileReader();
   reader.onload = () => {
-    try{ loadSpec(JSON.parse(reader.result)); }
+    try{ state.traces = []; loadSpec(JSON.parse(reader.result)); }
     catch(err){ alert("flowdoc.json 파싱 실패: " + err.message); }
   };
   reader.readAsText(file);
@@ -289,6 +374,31 @@ function routeOf(node){
     }
   }
   return null;
+}
+
+/* ---- trace overlay classification (3 states) ---- */
+const idOwner = id => (id||"").split("#")[0];
+
+// External boundaries the AOP agent never advises — a miss here means "not observable",
+// not "not executed". The static scanner already marks these.
+function isUnobservable(node){
+  return node.kind === "external"
+    || !!annByName(node,"Repository")
+    || !!annByName(node,"FlowExternal");
+}
+
+// "" (no trace) | traveled (observed) | unobs (ran but invisible) | nottaken (real miss)
+// `inherited` carries the parent's verdict down: once we lose sight of a frame, every
+// node beneath it is also unobservable — we can't claim its callees ran or didn't.
+function traceClass(node, parentNode, inherited){
+  if(!state.traveledNodes) return "";
+  if(state.traveledNodes.has(node.id)) return "traveled";
+  if(inherited) return inherited;            // below a blind (unobs) or skipped frame
+  if(isUnobservable(node)) return "unobs";
+  // self-invocation: an observed caller into its own class — Spring AOP can't see it.
+  if(parentNode && state.traveledNodes.has(parentNode.id)
+     && idOwner(node.id) === idOwner(parentNode.id)) return "unobs";
+  return "nottaken";
 }
 
 /* ---------------- tree ---------------- */
@@ -420,6 +530,10 @@ function badgesFor(node, tn, isEntry, inTx){
     ? `<span class="badge b-write">쓰기</span>`
     : `<span class="badge b-warn">⚠ tx-외 쓰기</span>`);
   if(tn && tn.cyclic) out.push(`<span class="badge b-cycle">↻ 순환</span>`);
+  if(state.traveledNodes && state.traveledNodes.has(node.id)){
+    const ms = state.traceTiming ? state.traceTiming[node.id] : null;
+    out.push(`<span class="badge b-trace">▶${ms!=null ? " "+ms+"ms" : " 탔음"}</span>`);
+  }
   out.push(smellBadgesFor(node));
   return out.join("");
 }
@@ -521,15 +635,33 @@ function renderBody(node){
 
 /* ---------------- rendering: node + children ---------------- */
 
-function renderTreeNode(tn, isEntry, inTx){
+function renderTreeNode(tn, isEntry, inTx, inherited){
   const node = state.nodesById[tn.id];
   const badges = badgesFor(node, tn, isEntry, inTx);
   const leaf = tn.children.length === 0;
+  const parentNode = tn.edge ? state.nodesById[tn.edge.from] : null;
+  const tcls = traceClass(node, parentNode, inherited);
+  const traceBadge = tcls === "unobs" ? `<span class="badge b-unobs">관측 밖</span>` : "";
+  // Observed frames let children be judged fresh; anything else blinds its subtree.
+  const childInherited = (tcls === "" || tcls === "traveled") ? "" : tcls;
 
-  let html = `<div class="node${leaf ? " leaf":""}" data-node-id="${esc(node.id)}">`
+  // Failure frame: deepest observed span the exception passed through.
+  const isErr = state.traceError && state.traceError.nodeId === tn.id;
+  const errBadge = isErr ? `<span class="badge b-err">⚠ 실패 지점</span>` : "";
+  // If the throw is actually below this frame, that subtree is unobserved.
+  const deeperBlind = isErr && tn.children.some(c =>
+    traceClass(state.nodesById[c.id], node, childInherited) === "unobs");
+  const errStrip = isErr
+    ? `<div class="err-strip">⚠ ${esc(state.traceError.message)}`
+      + `<br><span class="where">관측된 가장 깊은 실패 프레임`
+      + (deeperBlind ? " — 실제 throw는 이 아래 관측 밖일 수 있음" : "") + `</span></div>`
+    : "";
+
+  let html = `<div class="node${leaf ? " leaf":""}${tcls ? " "+tcls : ""}${isErr ? " errnode":""}" data-node-id="${esc(node.id)}">`
     + `<button class="node-head" aria-expanded="false"><span class="chev">›</span>`
     + `<span class="sig">${renderSig(node)}</span>`
-    + `<span class="badges">${badges}</span></button>`
+    + `<span class="badges">${errBadge}${badges}${traceBadge}</span></button>`
+    + errStrip
     + renderBody(node)
     + `</div>`;
 
@@ -539,16 +671,16 @@ function renderTreeNode(tn, isEntry, inTx){
       const txKids    = tn.children.filter(c => !isAsync(state.nodesById[c.id]));
       if(txKids.length){
         html += `<div class="tx-group"><span class="tx-label begin">tx begin</span>`
-              + txKids.map(c => renderTreeNode(c,false,true)).join("")
+              + txKids.map(c => renderTreeNode(c,false,true,childInherited)).join("")
               + `<span class="tx-label commit">commit</span></div>`;
       }
       if(asyncKids.length){               // async post-commit lives OUTSIDE the rail
         html += `<div class="child async-out">`
-              + asyncKids.map(c => renderTreeNode(c,false,false)).join("") + `</div>`;
+              + asyncKids.map(c => renderTreeNode(c,false,false,childInherited)).join("") + `</div>`;
       }
     } else {
       html += `<div class="child">`
-            + tn.children.map(c => renderTreeNode(c,false,inTx)).join("") + `</div>`;
+            + tn.children.map(c => renderTreeNode(c,false,inTx,childInherited)).join("") + `</div>`;
     }
   }
   return html;
@@ -594,8 +726,9 @@ function render(){
   const desc = seq.description
     || "진입점에서 시작해 요청이 어떤 함수를 거쳐 나가는지. 행을 누르면 파라미터·리턴·어노테이션·설명이 펼쳐집니다.";
 
+  const flowCls = state.traveledNodes ? "flow has-trace" : "flow";
   const flowHtml = entryNode
-    ? `<div class="flow">${renderTreeNode(tree, true, false)}</div>`
+    ? `<div class="${flowCls}">${renderTreeNode(tree, true, false, "")}</div>`
     : `<p class="seq-desc">진입 노드 <code>${esc(seq.entry)}</code> 를 스펙에서 찾지 못했습니다.</p>`;
 
   app.innerHTML = sidebarHtml(seqs) +
@@ -696,14 +829,64 @@ function sidebarHtml(seqs){
     + `</div>`
     + `<div id="impact-panel">${impactPanelHtml()}</div>`
     + `<div>${seqSection}</div>`
+    + `<div>${traceSectionHtml()}</div>`
     + `<div><div class="sb-section-label">범례</div><div class="legend">`
     + `<span class="chip"><span class="sw tx"></span>트랜잭션 경계</span>`
     + `<span class="chip"><span class="sw sem"></span>세마포어 가드</span>`
     + `<span class="chip"><span class="sw async"></span>비동기 후처리</span>`
     + `<span class="chip"><span class="sw ext"></span>외부 호출</span>`
-    + `</div></div>`
+    + `</div>`
+    + ((state.traces||[]).length
+        ? `<div class="sb-section-label" style="margin-top:14px">오버레이</div><div class="legend">`
+          + `<span class="chip"><span class="sw tr"></span>탄 경로 (관측)</span>`
+          + `<span class="chip"><span class="sw unobs"></span>관측 밖 (계측 한계)</span>`
+          + `<span class="chip"><span class="sw skip"></span>안 탐</span>`
+          + `<span class="chip"><span class="sw err"></span>실패 지점</span>`
+          + `</div>`
+        : "")
+    + `</div>`
     + `<div>${smellPanelHtml(seq)}</div>`
     + `</aside>`;
+}
+
+// Runtime overlay section: pick a recorded execution to replay over the tree.
+function traceSectionHtml(){
+  const traces = state.traces || [];
+  const label = `<div class="sb-section-label">런타임 트레이스 (${traces.length})</div>`;
+  if(!traces.length){
+    return label + `<div class="specbox">라이브 <code>/flowdoc</code>에서 요청을 보내면 `
+      + `실제 실행 경로가 여기 쌓입니다.<button id="trace-refresh">새로고침</button></div>`;
+  }
+  const shortTag = t => (t.sequenceTag||"").split("#")[1]?.split("(")[0] || t.sequenceTag || t.traceId;
+  const totalMs = t => {
+    const root = t.spans.find(s => s.parent == null) || t.spans[0];
+    return (root && root.tEnter != null && root.tExit != null) ? (root.tExit - root.tEnter) : null;
+  };
+  // Prefer the entered sequence's trigger ("POST /x") so two calls to different
+  // endpoints aren't both just "issue".
+  const triggerLabel = t => {
+    const seq = (state.spec.sequences||[]).find(s => s.entry === t.sequenceTag);
+    const tr = seq && seq.trigger;
+    if(tr){
+      if(tr.kind === "http" && tr.detail) return `${tr.detail.verb||"HTTP"} ${tr.detail.path||""}`.trim();
+      return tr.label || tr.kind;
+    }
+    return shortTag(t);
+  };
+  const items = traces.map((t,i) => {
+    const ms = totalMs(t);
+    const outcome = t.error
+      ? `<span class="badge b-warn" title="${esc(t.error)}">⚠ 에러</span>`
+      : `<span class="badge b-write">OK</span>`;
+    const meta = `${t.spans.length} spans${ms!=null ? " · "+ms+"ms" : ""}`;
+    return `<button class="seq-item trace-item${i===state.traceIndex?" active":""}" data-trace="${i}">`
+         + `<div class="stag">▶ ${esc(triggerLabel(t))} ${outcome}</div>`
+         + `<div class="trace-meta">${esc(meta)}</div></button>`;
+  }).join("");
+  return label + `<div class="seq-list">${items}</div>`
+    + `<div class="trace-actions">`
+    + `<button id="trace-clear"${state.traceIndex==null?" disabled":""}>구조만 보기</button>`
+    + `<button id="trace-refresh">새로고침</button></div>`;
 }
 
 function renderEmpty(){
@@ -747,6 +930,13 @@ function wireUp(){
   const lb = document.getElementById("loadbtn");
   if(lb) lb.addEventListener("click", () => document.getElementById("filein").click());
   applyImpactHighlight();
+  document.querySelectorAll(".trace-item").forEach(btn => {
+    btn.addEventListener("click", () => selectTrace(parseInt(btn.dataset.trace, 10)));
+  });
+  const tc = document.getElementById("trace-clear");
+  if(tc) tc.addEventListener("click", clearTrace);
+  const tr = document.getElementById("trace-refresh");
+  if(tr) tr.addEventListener("click", refreshTraces);
 }
 
 document.getElementById("filein").addEventListener("change", e => {
