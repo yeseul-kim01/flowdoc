@@ -170,6 +170,27 @@
     .badges{display:none}
     .main{padding:22px 16px 60px}
   }
+
+  /* ---- smell badges (feat/flowdoc-ui-insights) ----
+     Kept in its own block, separate from the .b-warn cluster above, so it
+     doesn't collide with PR #8's runtime-trace CSS insertion point. */
+  .b-smell-err{background:var(--sem-bg);color:var(--sem);font-weight:600}
+  .b-smell-warn{background:#FBF1D2;color:#8A6D00;font-weight:600}
+
+  .smell-group{margin-bottom:8px}
+  .smell-rule{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:5px}
+  .smell-count{font-family:var(--mono);font-size:10.5px;background:var(--bg);border-radius:999px;
+    padding:1px 7px;margin-left:6px;color:var(--faint)}
+  .smell-row{all:unset;display:flex;align-items:center;gap:7px;cursor:pointer;width:100%;
+    box-sizing:border-box;border:1px solid var(--border);border-radius:8px;padding:7px 10px;
+    margin-bottom:4px;font-family:var(--mono);font-size:12px}
+  .smell-row:hover{border-color:var(--line);background:var(--bg)}
+  .sev-dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .smell-row.sev-error .sev-dot{background:var(--sem)}
+  .smell-row.sev-warn .sev-dot{background:#C89A1E}
+
+  .node.smell-flash{animation:smellFlash 1.1s ease}
+  @keyframes smellFlash{0%{background:var(--accent-soft)}100%{background:var(--surface)}}
 </style>
 </head>
 <body>
@@ -307,7 +328,37 @@ function badgesFor(node, tn, isEntry, inTx){
     ? `<span class="badge b-write">쓰기</span>`
     : `<span class="badge b-warn">⚠ tx-외 쓰기</span>`);
   if(tn && tn.cyclic) out.push(`<span class="badge b-cycle">↻ 순환</span>`);
+  out.push(smellBadgesFor(node));
   return out.join("");
+}
+
+/* ---------------- smells (rule engine output on the current sequence) ---------------- */
+
+function currentSeq(){
+  return ((state.spec && state.spec.sequences) || [])[state.seqIndex];
+}
+function smellsFor(nodeId){
+  const seq = currentSeq();
+  return ((seq && seq.smells) || []).filter(s => s.nodeId === nodeId);
+}
+function smellBadgesFor(node){
+  const smells = smellsFor(node.id);
+  if(!smells.length) return "";
+  const sorted = smells.slice().sort((a,b) => (a.severity==="error"?0:1) - (b.severity==="error"?0:1));
+  return sorted.map(s => {
+    const cls = s.severity === "error" ? "b-smell-err" : "b-smell-warn";
+    const icon = s.severity === "error" ? "✖" : "⚠";
+    return `<span class="badge ${cls}" title="${esc(s.message)}">${icon} ${esc(s.rule)}</span>`;
+  }).join("");
+}
+function scrollToNode(nodeId){
+  const el = Array.from(document.querySelectorAll(".node[data-node-id]"))
+    .find(n => n.dataset.nodeId === nodeId);
+  if(!el) return;
+  el.scrollIntoView({behavior:"smooth", block:"center"});
+  el.classList.remove("smell-flash");
+  void el.offsetWidth;                  // restart the CSS animation
+  el.classList.add("smell-flash");
 }
 
 /* ---------------- rendering: detail body ---------------- */
@@ -372,7 +423,7 @@ function renderTreeNode(tn, isEntry, inTx){
   const badges = badgesFor(node, tn, isEntry, inTx);
   const leaf = tn.children.length === 0;
 
-  let html = `<div class="node${leaf ? " leaf":""}">`
+  let html = `<div class="node${leaf ? " leaf":""}" data-node-id="${esc(node.id)}">`
     + `<button class="node-head" aria-expanded="false"><span class="chev">›</span>`
     + `<span class="sig">${renderSig(node)}</span>`
     + `<span class="badges">${badges}</span></button>`
@@ -451,6 +502,25 @@ function render(){
   wireUp();
 }
 
+function smellPanelHtml(seq){
+  const smells = (seq && seq.smells) || [];
+  if(!smells.length) return "";
+  const byRule = {};
+  smells.forEach(s => (byRule[s.rule] ||= []).push(s));
+  const body = Object.keys(byRule).sort().map(rule => {
+    const list = byRule[rule];
+    const rows = list.map(s => {
+      const n = state.nodesById[s.nodeId];
+      const name = n ? n.simpleName : s.nodeId;
+      return `<button class="smell-row sev-${s.severity}" data-smell-node="${esc(s.nodeId)}" title="${esc(s.message)}">`
+        + `<span class="sev-dot"></span>${esc(name)}</button>`;
+    }).join("");
+    return `<div class="smell-group"><div class="smell-rule">${esc(rule)}`
+      + `<span class="smell-count">${list.length}</span></div>${rows}</div>`;
+  }).join("");
+  return `<div class="sb-section-label" style="margin-top:14px">스멜 (${smells.length})</div>${body}`;
+}
+
 function sidebarHtml(seqs){
   const spec = state.spec || {};
   const src = spec.source || {};
@@ -478,6 +548,8 @@ function sidebarHtml(seqs){
     : `<div class="sb-section-label">시퀀스 (${seqs.length})</div>`
       + `<div class="seq-list">${listOf(idx)||'<div class="specbox">없음</div>'}</div>`;
 
+  const seq = (spec.sequences||[])[state.seqIndex];
+
   return `<aside class="sidebar">`
     + `<div class="wordmark"><span class="glyph">↳</span>FlowDoc<span class="tag">v${esc(spec.flowdoc||"?")}</span></div>`
     + `<div><div class="sb-section-label">Spec</div>`
@@ -490,7 +562,9 @@ function sidebarHtml(seqs){
     + `<span class="chip"><span class="sw sem"></span>세마포어 가드</span>`
     + `<span class="chip"><span class="sw async"></span>비동기 후처리</span>`
     + `<span class="chip"><span class="sw ext"></span>외부 호출</span>`
-    + `</div></div></aside>`;
+    + `</div></div>`
+    + `<div>${smellPanelHtml(seq)}</div>`
+    + `</aside>`;
 }
 
 function renderEmpty(){
@@ -524,6 +598,9 @@ function wireUp(){
       state.seqIndex = parseInt(btn.dataset.seq, 10);
       render();
     });
+  });
+  document.querySelectorAll(".smell-row").forEach(btn => {
+    btn.addEventListener("click", () => scrollToNode(btn.dataset.smellNode));
   });
   const lb = document.getElementById("loadbtn");
   if(lb) lb.addEventListener("click", () => document.getElementById("filein").click());
