@@ -356,3 +356,67 @@ def test_transaction_none_for_non_db_function(tmp_path: Path) -> None:
     assert result is not None
     defn = result.definitions[0]
     assert defn.transaction is None
+
+
+# ---------------------------------------------------------------------------
+# paramDocs extraction (Google / Sphinx / NumPy docstring styles)
+# ---------------------------------------------------------------------------
+
+def test_param_docs_google_style(tmp_path: Path) -> None:
+    """Google-style 'Args:' section maps each param to its description."""
+    src = '''
+        def issue(campaign_id: int, user_id: str) -> str:
+            """Issue a coupon.
+
+            Args:
+                campaign_id: Target campaign identifier.
+                user_id: User receiving the coupon.
+
+            Returns:
+                The issued coupon code.
+            """
+            return "code"
+    '''
+    f = _write_py(tmp_path, "google.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.param_docs == {
+        "campaign_id": "Target campaign identifier.",
+        "user_id": "User receiving the coupon.",
+    }
+
+
+def test_param_docs_sphinx_style(tmp_path: Path) -> None:
+    """Sphinx-style ':param name:' directives map each param to its description."""
+    src = '''
+        def issue(campaign_id: int, user_id: str) -> str:
+            """Issue a coupon.
+
+            :param campaign_id: Target campaign identifier.
+            :param user_id: User receiving the coupon.
+            :return: The issued coupon code.
+            """
+            return "code"
+    '''
+    f = _write_py(tmp_path, "sphinx.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.param_docs == {
+        "campaign_id": "Target campaign identifier.",
+        "user_id": "User receiving the coupon.",
+    }
+
+
+def test_param_docs_absent_without_docstring(tmp_path: Path) -> None:
+    """No docstring -> param_docs is empty, no error."""
+    src = """
+        def issue(campaign_id: int, user_id: str) -> str:
+            return "code"
+    """
+    f = _write_py(tmp_path, "nodoc.py", src)
+    result = parse_file(f, tmp_path)
+    assert result is not None
+    defn = result.definitions[0]
+    assert defn.param_docs == {}

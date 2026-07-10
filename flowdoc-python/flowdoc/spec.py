@@ -52,6 +52,7 @@ class Declared:
     """Manually declared metadata (e.g. docstring description)."""
 
     description: str | None = None
+    paramDocs: dict[str, str] | None = None
 
 
 

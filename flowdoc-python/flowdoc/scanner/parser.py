@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ast
+import inspect
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -79,6 +81,8 @@ class FunctionDef:
     annotations: list[AnnotationInfo] = field(default_factory=list)
     # Optional: docstring first line
     description: Optional[str] = None
+    # Optional: per-parameter descriptions extracted from the docstring body
+    param_docs: dict[str, str] = field(default_factory=dict)
     # For local-variable type resolution: {var_name: type_str}
     local_types: dict[str, str] = field(default_factory=dict)
     # SQLAlchemy access pattern detected in body
@@ -156,12 +160,141 @@ def _build_node_id(module_path: str, class_name: Optional[str], func_name: str, 
     return f"{owner}#{func_name}({param_types})"
 
 
+def _full_docstring(body: list[ast.stmt]) -> Optional[str]:
+    """Extract the full (dedented) docstring text from a function/class body."""
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+        doc = body[0].value.value
+        if isinstance(doc, str) and doc.strip():
+            return inspect.cleandoc(doc)
+    return None
+
+
 def _first_docstring(body: list[ast.stmt]) -> Optional[str]:
     """Extract the first line of a docstring from a function/class body."""
-    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
-        doc = str(body[0].value.value).strip()
-        return doc.split("\n")[0] if doc else None
-    return None
+    full = _full_docstring(body)
+    return full.split("\n")[0] if full else None
+
+
+# ---------------------------------------------------------------------------
+# Per-parameter docstring extraction (Google / Sphinx / NumPy styles)
+# ---------------------------------------------------------------------------
+
+_SPHINX_PARAM_RE = re.compile(r"^:param\s+(\*{0,2}\w+)\s*:\s*(.*)$")
+_GOOGLE_HEADER_RE = re.compile(r"^(Args|Arguments):\s*$")
+_GOOGLE_PARAM_RE = re.compile(r"^(\*{0,2}\w+)\s*(?:\([^)]*\))?\s*:\s*(.*)$")
+_ANY_SECTION_HEADER_RE = re.compile(r"^[A-Za-z][A-Za-z ]*:\s*$")
+_NUMPY_HEADER_RE = re.compile(r"^Parameters\s*$")
+_NUMPY_UNDERLINE_RE = re.compile(r"^-{3,}\s*$")
+_NUMPY_PARAM_RE = re.compile(r"^(\*{0,2}\w+)\s*:\s*.*$")
+
+
+def _parse_sphinx_params(lines: list[str]) -> dict[str, str]:
+    """Extract ``:param name: description`` directives (Sphinx style)."""
+    docs: dict[str, str] = {}
+    current: Optional[str] = None
+    for line in lines:
+        stripped = line.strip()
+        m = _SPHINX_PARAM_RE.match(stripped)
+        if m:
+            current = m.group(1).lstrip("*")
+            docs[current] = m.group(2).strip()
+            continue
+        if stripped.startswith(":"):
+            current = None  # a different field (:return:, :raises:, ...)
+            continue
+        if current and stripped:
+            docs[current] = f"{docs[current]} {stripped}".strip()
+    return docs
+
+
+def _parse_google_params(lines: list[str]) -> dict[str, str]:
+    """Extract descriptions from a Google-style ``Args:``/``Arguments:`` section."""
+    docs: dict[str, str] = {}
+    i, n = 0, len(lines)
+    while i < n and not _GOOGLE_HEADER_RE.match(lines[i].strip()):
+        i += 1
+    if i == n:
+        return docs
+    i += 1
+    base_indent: Optional[int] = None
+    current: Optional[str] = None
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped:
+            i += 1
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if base_indent is None:
+            base_indent = indent
+        if indent < base_indent:
+            break
+        if indent == base_indent:
+            m = _GOOGLE_PARAM_RE.match(stripped)
+            if m:
+                current = m.group(1).lstrip("*")
+                docs[current] = m.group(2).strip()
+                i += 1
+                continue
+            if _ANY_SECTION_HEADER_RE.match(stripped):
+                break  # a new section (Returns:, Raises:, …) ends the params block
+        if current:
+            docs[current] = f"{docs[current]} {stripped}".strip()
+        i += 1
+    return docs
+
+
+def _parse_numpy_params(lines: list[str]) -> dict[str, str]:
+    """Extract descriptions from a NumPy-style ``Parameters\\n----------`` section."""
+    docs: dict[str, str] = {}
+    i, n = 0, len(lines)
+    while i < n and not _NUMPY_HEADER_RE.match(lines[i].strip()):
+        i += 1
+    if i == n or i + 1 >= n or not _NUMPY_UNDERLINE_RE.match(lines[i + 1].strip()):
+        return docs
+    i += 2
+    base_indent: Optional[int] = None
+    current: Optional[str] = None
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped:
+            i += 1
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if base_indent is None:
+            base_indent = indent
+        if indent < base_indent:
+            break
+        if indent == base_indent:
+            m = _NUMPY_PARAM_RE.match(stripped)
+            if m:
+                current = m.group(1).lstrip("*")
+                docs.setdefault(current, "")
+                i += 1
+                continue
+            break  # unrecognised same-indent line -> a new section, stop
+        if current is not None:
+            docs[current] = f"{docs[current]} {stripped}".strip()
+        i += 1
+    return {k: v for k, v in docs.items() if v}
+
+
+def _parse_param_docs(docstring: Optional[str]) -> dict[str, str]:
+    """Extract per-parameter descriptions from a full docstring.
+
+    Tries Sphinx (``:param name:``), then Google (``Args:``), then a
+    lightweight NumPy (``Parameters\\n----------``) pass. Returns {} when no
+    recognised param block is found — absence just means no paramDocs.
+    """
+    if not docstring:
+        return {}
+    lines = docstring.splitlines()
+    return (
+        _parse_sphinx_params(lines)
+        or _parse_google_params(lines)
+        or _parse_numpy_params(lines)
+    )
 
 
 
@@ -450,7 +583,10 @@ class _FileVisitor(ast.NodeVisitor):
             if info:
                 annotations.append(info)
 
-        desc = _first_docstring(node.body)
+        full_doc = _full_docstring(node.body)
+        desc = full_doc.split("\n")[0] if full_doc else None
+        param_docs = _parse_param_docs(full_doc)
+        param_docs = {k: v for k, v in param_docs.items() if any(p.name == k for p in params)}
 
         transaction = _detect_transaction(node, local_types, annotations)
 
@@ -473,6 +609,7 @@ class _FileVisitor(ast.NodeVisitor):
             return_type=return_type,
             annotations=annotations,
             description=desc,
+            param_docs=param_docs,
             local_types=local_types,
             data_access=data_access,
             transaction=transaction,

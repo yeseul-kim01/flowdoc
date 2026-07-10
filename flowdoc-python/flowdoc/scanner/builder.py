@@ -70,7 +70,11 @@ def _build_node(defn: FunctionDef, root: Path) -> Node:
         for ann in defn.annotations
     ]
     auto = Auto(params=params, returns=returns, annotations=annotations)
-    declared = Declared(description=defn.description) if defn.description else None
+    declared = (
+        Declared(description=defn.description, paramDocs=defn.param_docs or None)
+        if defn.description or defn.param_docs
+        else None
+    )
     if defn.data_access or defn.transaction:
         markers = Markers(transaction=defn.transaction, dataAccess=defn.data_access)
     else:
