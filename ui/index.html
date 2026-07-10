@@ -179,6 +179,7 @@
 
   .smell-group{margin-bottom:8px}
   .smell-rule{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:5px}
+  .smell-rule .rule-id{color:var(--faint);font-size:10.5px}
   .smell-count{font-family:var(--mono);font-size:10.5px;background:var(--bg);border-radius:999px;
     padding:1px 7px;margin-left:6px;color:var(--faint)}
   .smell-row{all:unset;display:flex;align-items:center;gap:7px;cursor:pointer;width:100%;
@@ -409,6 +410,14 @@ function badgesFor(node, tn, isEntry, inTx){
 
 /* ---------------- smells (rule engine output on the current sequence) ---------------- */
 
+// Korean label per rule id; unmapped rules fall back to the raw identifier.
+const SMELL_LABELS = {
+  tx_outside_write: "tx-외 쓰기",
+  unguarded_shared_write: "가드 없는 쓰기",
+  query_in_loop: "루프 내 쿼리",
+};
+function smellLabel(rule){ return SMELL_LABELS[rule] || rule; }
+
 function currentSeq(){
   return ((state.spec && state.spec.sequences) || [])[state.seqIndex];
 }
@@ -417,13 +426,16 @@ function smellsFor(nodeId){
   return ((seq && seq.smells) || []).filter(s => s.nodeId === nodeId);
 }
 function smellBadgesFor(node){
-  const smells = smellsFor(node.id);
+  // tx_outside_write duplicates the existing "⚠ tx-외 쓰기" badge below (same nodeId,
+  // same signal — markers.dataAccess==="write" outside a tx) — skip it here, keep it
+  // in the sidebar smell panel/count where it's the only source of that information.
+  const smells = smellsFor(node.id).filter(s => s.rule !== "tx_outside_write");
   if(!smells.length) return "";
   const sorted = smells.slice().sort((a,b) => (a.severity==="error"?0:1) - (b.severity==="error"?0:1));
   return sorted.map(s => {
     const cls = s.severity === "error" ? "b-smell-err" : "b-smell-warn";
     const icon = s.severity === "error" ? "✖" : "⚠";
-    return `<span class="badge ${cls}" title="${esc(s.message)}">${icon} ${esc(s.rule)}</span>`;
+    return `<span class="badge ${cls}" title="${esc(s.rule)} — ${esc(s.message)}">${icon} ${esc(smellLabel(s.rule))}</span>`;
   }).join("");
 }
 function scrollToNode(nodeId){
@@ -592,8 +604,8 @@ function smellPanelHtml(seq){
       return `<button class="smell-row sev-${s.severity}" data-smell-node="${esc(s.nodeId)}" title="${esc(s.message)}">`
         + `<span class="sev-dot"></span>${esc(name)}</button>`;
     }).join("");
-    return `<div class="smell-group"><div class="smell-rule">${esc(rule)}`
-      + `<span class="smell-count">${list.length}</span></div>${rows}</div>`;
+    return `<div class="smell-group"><div class="smell-rule">${esc(smellLabel(rule))} `
+      + `<span class="rule-id">(${esc(rule)})</span><span class="smell-count">${list.length}</span></div>${rows}</div>`;
   }).join("");
   return `<div class="sb-section-label" style="margin-top:14px">스멜 (${smells.length})</div>${body}`;
 }
