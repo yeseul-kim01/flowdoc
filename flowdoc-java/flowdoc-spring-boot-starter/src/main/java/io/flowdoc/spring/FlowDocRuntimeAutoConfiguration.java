@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.flowdoc.runtime.FlowDocTraceAspect;
+import io.flowdoc.runtime.FlowDocTraceTaskDecorator;
 import io.flowdoc.runtime.TraceRecorder;
 import org.aspectj.lang.annotation.Aspect;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -51,6 +52,18 @@ public class FlowDocRuntimeAutoConfiguration {
     @ConditionalOnMissingBean
     public FlowDocTraceAspect flowDocTraceAspect(TraceRecorder recorder) {
         return new FlowDocTraceAspect(recorder);
+    }
+
+    /**
+     * Stitches {@code @Async} calls into their caller's trace. Spring Boot's
+     * {@code TaskExecutionAutoConfiguration} applies a single {@link org.springframework.core.task.TaskDecorator}
+     * bean to the auto-configured {@code applicationTaskExecutor} that {@code @Async} uses
+     * by default — so this bean is the whole wiring for apps on the default executor.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public FlowDocTraceTaskDecorator flowDocTraceTaskDecorator(TraceRecorder recorder) {
+        return new FlowDocTraceTaskDecorator(recorder);
     }
 
     @Bean

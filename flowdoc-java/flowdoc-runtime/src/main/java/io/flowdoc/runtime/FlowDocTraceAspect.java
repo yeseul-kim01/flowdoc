@@ -16,7 +16,10 @@ import java.lang.reflect.Method;
  * scanner — the trace lands on the structure graph the UI already draws.
  *
  * <p>Runs at {@link Ordered#HIGHEST_PRECEDENCE} so a span wraps the transaction
- * boundary (and everything else) rather than nesting inside it.
+ * boundary (and everything else) rather than nesting inside it. This also places the
+ * advice <em>inside</em> Spring's {@code @Async} interceptor, so an {@code @Async}
+ * method is observed here on its worker thread — the {@link FlowDocTraceTaskDecorator}
+ * carries the caller's trace across the hop so the span still lands in it.
  *
  * <p><b>Known blind spot:</b> Spring AOP only advises calls that cross the proxy,
  * so a bean calling its own method ({@code this.foo()}) is invisible here. The
