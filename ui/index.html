@@ -134,6 +134,46 @@
     padding:6px 8px;cursor:pointer}
   .trace-actions button:hover{border-color:var(--line)}
 
+  /* ---- sequence lens (0002) ---- */
+  .lens-toggle{display:inline-flex;gap:0;margin-top:14px;border:1px solid var(--border);
+    border-radius:8px;overflow:hidden;background:var(--bg)}
+  .lens-toggle button{font-family:var(--sans);font-size:12.5px;font-weight:500;color:var(--muted);
+    background:transparent;border:0;padding:7px 16px;cursor:pointer}
+  .lens-toggle button.active{background:var(--accent);color:#fff}
+  .seq-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;
+    font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .seq-legend span::before{content:"";display:inline-block;width:16px;height:0;vertical-align:middle;
+    margin-right:5px}
+  .seq-legend .l-obs::before{border-top:2px solid var(--accent)}
+  .seq-legend .l-async::before{border-top:2px dashed var(--async)}
+  .seq-legend .l-unobs::before{border-top:2px dashed #9AA3B2}
+  .seq-legend .l-err::before{border-top:2px solid var(--sem)}
+  .seq-export{display:flex;align-items:center;gap:8px;margin-top:12px}
+  .seq-export button{font-family:var(--sans);font-size:12px;font-weight:500;color:var(--muted);
+    background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:6px 12px;cursor:pointer}
+  .seq-export button:hover{border-color:var(--accent);color:var(--accent-ink)}
+  .seq-export-hint{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .seqwrap{overflow-x:auto;padding:8px 4px 4px}
+  .seqsvg{display:block}
+  .seqsvg .lifeline{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
+  .seqsvg .phead rect{fill:var(--surface);stroke:var(--border);stroke-width:1}
+  .seqsvg .phead text{font-family:var(--sans);font-size:12.5px;font-weight:600;fill:var(--ink)}
+  .seqsvg .phead.actor rect{fill:var(--accent-soft);stroke:var(--accent-soft)}
+  .seqsvg .phead.actor text{fill:var(--accent-ink)}
+  .seqsvg .act{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1}
+  .seqsvg .act.err{fill:var(--sem-bg);stroke:var(--sem)}
+  .seqsvg .msg{stroke:var(--accent);stroke-width:1.5}
+  .seqsvg .msg.ret{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 4}
+  .seqsvg .msg.async{stroke:var(--async);stroke-dasharray:5 4}
+  .seqsvg .msg.err{stroke:var(--sem);stroke-width:1.5;stroke-dasharray:0}
+  .seqsvg .msg.unobs{stroke:#9AA3B2;stroke-width:1.3;stroke-dasharray:5 4}
+  .seqsvg .msg.uret{stroke:#C3C9D4;stroke-width:1;stroke-dasharray:3 4}
+  .seqsvg .act.unobs{fill:#F1F3F6;stroke:#B9C0CC}
+  .seqsvg .mlabel{font-family:var(--mono);font-size:11.5px;fill:var(--ink)}
+  .seqsvg .mlabel.err{fill:var(--sem);font-weight:600}
+  .seqsvg .mlabel.unobs{fill:#56627A}
+  .seq-empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:20px 4px}
+
   .tx-group{position:relative;margin-left:22px;padding-left:20px;
     border-left:2px solid var(--tx-line);display:flex;flex-direction:column;gap:8px;
     padding-top:4px;padding-bottom:4px;margin-top:8px}
@@ -217,7 +257,9 @@ const ENTRY_ANNS = new Set([...Object.keys(VERB),
 
 const state = { spec:null, nodesById:{}, adjacency:{}, guardsById:{}, seqIndex:0,
   // runtime overlay (v0.3): recorded traces + the currently replayed one
-  traces:[], traceIndex:null, traveledNodes:null, traceTiming:null, traceError:null };
+  traces:[], traceIndex:null, traveledNodes:null, traceTiming:null, traceError:null,
+  // sequence lens (0002): "tree" call hierarchy | "sequence" from the selected trace
+  lens:"tree" };
 
 /* ---------------- loading ---------------- */
 
@@ -531,6 +573,252 @@ function renderTreeNode(tn, isEntry, inTx, inherited){
   return html;
 }
 
+/* ---------------- sequence lens (0002) ---------------- */
+// A recorded trace already carries sequence-diagram data: spans give order (tEnter),
+// caller (parent), participant (nodeId owner) and thread. We render it directly — an
+// execution-verified, always-fresh sequence diagram — keeping the overlay's honesty:
+// unobserved calls (repo/external/self) have no span, so we never draw them as real
+// arrows; we mark them with a "관측 밖" note instead.
+
+const spanSeqNo = id => parseInt(String(id).replace(/^s/, ""), 10) || 0;
+
+// Participant name for a span: the scanner's short owner when the node is known.
+function spanOwner(nodeId){
+  const n = state.nodesById[nodeId];
+  if(n && n.owner) return n.owner;
+  const fqn = idOwner(nodeId);
+  return fqn.split(".").pop() || fqn;
+}
+// "method(Type,Type)" message label, straight from the node id (already simplified).
+function spanSig(nodeId){ return (nodeId.split("#")[1]) || nodeId; }
+
+// Is this static edge a call the agent can't observe (repo/external/self-invocation)?
+// Such a call has no runtime span, but the graph knows the edge — returns its drawable
+// {owner,label} so the sequence can show it dashed ("관측 밖"), or null if it's an
+// ordinary instrumentable call (which, if not taken this run, is simply omitted).
+function edgeUnobserved(parentNodeId, e){
+  const child = state.nodesById[e.to];
+  const selfCall = idOwner(e.to) === idOwner(parentNodeId);
+  if(child && !isUnobservable(child) && !selfCall) return null;
+  return { owner: spanOwner(e.to), label: spanSig(e.to), self: selfCall };
+}
+
+function spanForest(spans){
+  const byId = {}; spans.forEach(s => byId[s.id] = s);
+  const kids = {}; const roots = [];
+  spans.slice().sort((a,b) => spanSeqNo(a.id) - spanSeqNo(b.id)).forEach(s => {
+    if(s.parent && byId[s.parent]) (kids[s.parent] = kids[s.parent] || []).push(s);
+    else roots.push(s);
+  });
+  Object.values(kids).forEach(a => a.sort((x,y) => spanSeqNo(x.id) - spanSeqNo(y.id)));
+  return { byId, kids, roots };
+}
+
+// Turn a trace into a participant/message model shared by the SVG view and the Mermaid
+// export — one source of truth so both lenses agree on order, async and 관측 밖 honesty.
+function sequenceModel(trace){
+  const spans = (trace && trace.spans) || [];
+  if(!spans.length) return null;
+  const { byId, kids, roots } = spanForest(spans);
+
+  // Exception path: the error span and its ancestors, drawn with --x returns.
+  const errorPath = new Set();
+  if(trace.errorSpanId){
+    let cur = byId[trace.errorSpanId];
+    while(cur){ errorPath.add(cur.id); cur = cur.parent ? byId[cur.parent] : null; }
+  }
+
+  const participants = ["요청"];
+  const pIndex = { "요청": 0 };
+  const addOwner = o => { if(!(o in pIndex)){ pIndex[o] = participants.length; participants.push(o); } };
+  const rootThread = roots[0] && roots[0].thread;
+
+  const rows = [];   // {kind:'call'|'return'|'ucall'|'uret'|'uself', ...}
+  const acts = [];   // observed activation bars {p,y0,y1,err}
+  const uacts = [];  // unobserved (관측 밖) activation bars {p,y0,y1}
+  function walk(span, callerIdx){
+    const owner = spanOwner(span.nodeId);
+    addOwner(owner);
+    const to = pIndex[owner];
+    const async = !!(span.thread && rootThread && span.thread !== rootThread);
+    const err = errorPath.has(span.id);
+    const y0 = rows.length;
+    rows.push({ kind:"call", from:callerIdx, to, label:spanSig(span.nodeId), err, async });
+    // Walk this frame's callees in static call-site order (the scanner's edge order =
+    // source order), so observed spans and dashed 관측 밖 calls interleave as written —
+    // e.g. an @Async dispatch shows at its call site, not after earlier siblings.
+    const childSpans = kids[span.id] || [];
+    const used = new Set(), seenU = new Set();
+    for(const e of (state.adjacency[span.nodeId] || [])){
+      const match = childSpans.filter(c => c.nodeId === e.to && !used.has(c.id));
+      if(match.length){ match.forEach(c => { used.add(c.id); walk(c, to); }); continue; }
+      const uc = edgeUnobserved(span.nodeId, e);   // else: observable-but-not-taken → omit
+      if(!uc) continue;
+      const key = uc.owner + "|" + uc.label;
+      if(seenU.has(key)) continue;
+      seenU.add(key);
+      addOwner(uc.owner);
+      const uto = pIndex[uc.owner];
+      if(uto === to){                         // self-invocation: a self-loop on this lifeline
+        rows.push({ kind:"uself", p:to, label:uc.label });
+      } else {
+        const uy0 = rows.length;
+        rows.push({ kind:"ucall", from:to, to:uto, label:uc.label });
+        rows.push({ kind:"uret", from:uto, to });
+        uacts.push({ p:uto, y0:uy0, y1:rows.length });
+      }
+    }
+    // Defensive: any observed child not matched to a static edge still gets drawn.
+    childSpans.filter(c => !used.has(c.id)).forEach(c => walk(c, to));
+    const y1 = rows.length;
+    rows.push({ kind:"return", from:to, to:callerIdx, err, async });
+    acts.push({ p:to, y0, y1, err });
+  }
+  roots.forEach(r => walk(r, 0));
+  return { participants, rows, acts, uacts };
+}
+
+function renderSequence(trace){
+  const model = sequenceModel(trace);
+  if(!model) return `<div class="seq-empty">이 트레이스에 span이 없습니다.</div>`;
+  const { participants, rows, acts, uacts } = model;
+
+  const COL = 178, PADX = 26, HEAD = 58, ROW = 30, TOP = HEAD + 16;
+  const laneX = i => PADX + i * COL + COL / 2;
+  const W = PADX * 2 + participants.length * COL;
+  const H = TOP + rows.length * ROW + 24;
+  const rowY = r => TOP + r * ROW + ROW / 2;
+
+  let s = `<svg class="seqsvg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="sequence diagram">`;
+  s += `<defs>`
+    + `<marker id="ah" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--accent)"/></marker>`
+    + `<marker id="ahx" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--sem)"/></marker>`
+    + `<marker id="aha" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--async)"/></marker>`
+    + `<marker id="ahu" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#9AA3B2"/></marker>`
+    + `</defs>`;
+
+  participants.forEach((p,i) => {
+    const x = laneX(i);
+    s += `<line class="lifeline" x1="${x}" y1="${HEAD}" x2="${x}" y2="${H-8}"/>`;
+    s += `<g class="phead${i===0 ? " actor" : ""}"><rect x="${x-COL/2+14}" y="14" width="${COL-28}" height="32" rx="8"/>`
+       + `<text x="${x}" y="35" text-anchor="middle">${esc(p)}</text></g>`;
+  });
+
+  uacts.forEach(a => {
+    const x = laneX(a.p), y0 = rowY(a.y0), y1 = rowY(a.y1);
+    s += `<rect class="act unobs" x="${x-5}" y="${y0}" width="10" height="${Math.max(7, y1-y0)}" rx="2"/>`;
+  });
+  acts.forEach(a => {
+    const x = laneX(a.p), y0 = rowY(a.y0), y1 = rowY(a.y1);
+    s += `<rect class="act${a.err ? " err" : ""}" x="${x-5}" y="${y0}" width="10" height="${Math.max(7, y1-y0)}" rx="2"/>`;
+  });
+
+  rows.forEach((r, idx) => {
+    const y = rowY(idx);
+    // Self-invocation the agent can't see: a small dashed loop on its own lifeline.
+    if(r.kind === "uself"){
+      const x = laneX(r.p);
+      s += `<path class="msg unobs" d="M${x+5},${y-5} h20 v10 h-14" fill="none" marker-end="url(#ahu)"/>`
+         + `<text class="mlabel unobs" x="${x+30}" y="${y-1}">${esc(r.label)}</text>`;
+      return;
+    }
+    if(r.kind === "return" && r.async) return;    // async is fire-and-forget: no return arrow
+    if(r.kind === "uret") {                         // dashed grey return, no label
+      const a1 = laneX(r.from), a2 = laneX(r.to), d = a2 > a1 ? 1 : -1;
+      s += `<line class="msg uret" x1="${a1 - d*5}" y1="${y}" x2="${a2 + d*5}" y2="${y}"/>`;
+      return;
+    }
+    const x1 = laneX(r.from), x2 = laneX(r.to);
+    if(x1 === x2) return;
+    const dir = x2 > x1 ? 1 : -1;
+    let cls, marker;
+    if(r.kind === "ucall"){ cls = "msg unobs"; marker = "ahu"; }
+    else if(r.kind === "call"){ cls = "msg call" + (r.err ? " err" : r.async ? " async" : ""); marker = r.err ? "ahx" : r.async ? "aha" : "ah"; }
+    else { cls = "msg ret" + (r.err ? " err" : ""); marker = r.err ? "ahx" : "ah"; }
+    s += `<line class="${cls}" x1="${x1 + dir*5}" y1="${y}" x2="${x2 - dir*5}" y2="${y}" marker-end="url(#${marker})"/>`;
+    if(r.kind === "call" || r.kind === "ucall"){
+      const lc = r.kind === "ucall" ? " unobs" : (r.err ? " err" : "");
+      s += `<text class="mlabel${lc}" x="${(x1+x2)/2}" y="${y-6}" text-anchor="middle">${esc(r.label)}</text>`;
+    } else if(r.err && r.to === 0){
+      s += `<text class="mlabel err" x="${(x1+x2)/2}" y="${y-6}" text-anchor="middle">✕ ${esc(trace.error || "error")}</text>`;
+    }
+  });
+
+  s += `</svg>`;
+  const legend = `<div class="seq-legend">`
+    + `<span class="l-obs">관측된 호출</span><span class="l-async">async (다른 스레드)</span>`
+    + `<span class="l-unobs">관측 밖 (repo·external·self)</span>`
+    + (trace.error ? `<span class="l-err">실패</span>` : "")
+    + `</div>`;
+  const bar = `<div class="seq-export">`
+    + `<button id="mm-copy" title="Mermaid sequenceDiagram 텍스트를 클립보드로">⧉ Mermaid 복사</button>`
+    + `<button id="mm-dl" title="PR·Confluence에 붙일 .md로 저장">↓ .md</button>`
+    + `<span class="seq-export-hint">GitHub·Confluence가 그대로 렌더</span></div>`;
+  return legend + bar + `<div class="seqwrap">${s}</div>`;
+}
+
+/* ---- Mermaid export (0002 Phase 2) ---- */
+// The recorded trace is the source; the Mermaid text mirrors the SVG lens exactly
+// (same order, async, 관측 밖, failure), so what teams paste is execution-verified.
+const MERMAID_ID = i => "p" + i;
+// Message text is everything after the first ':' on a line, so only newlines and ';'
+// truly break it; '#' starts a Mermaid entity code. Keep labels faithful otherwise.
+const mmEsc = s => String(s).replace(/[\r\n]+/g, " ").replace(/;/g, ",").replace(/#/g, "＃").trim();
+
+function traceToMermaid(trace){
+  const model = sequenceModel(trace);
+  if(!model) return "";
+  const { participants, rows } = model;
+  let out = "sequenceDiagram\n";
+  participants.forEach((p, i) => {
+    out += `  ${i === 0 ? "actor" : "participant"} ${MERMAID_ID(i)} as ${mmEsc(p)}\n`;
+  });
+  for(const r of rows){
+    if(r.kind === "call"){
+      out += `  ${MERMAID_ID(r.from)}${r.async ? "-)" : "->>"}${MERMAID_ID(r.to)}: ${mmEsc(r.label)}\n`;
+      if(!r.async) out += `  activate ${MERMAID_ID(r.to)}\n`;
+    } else if(r.kind === "return"){
+      if(r.async) continue;                               // async: no activation was opened
+      if(r.err) out += `  ${MERMAID_ID(r.from)}--x${MERMAID_ID(r.to)}: ✕ ${mmEsc(trace.error || "error")}\n`;
+      out += `  deactivate ${MERMAID_ID(r.from)}\n`;
+    } else if(r.kind === "ucall"){
+      out += `  ${MERMAID_ID(r.from)}-->>${MERMAID_ID(r.to)}: ${mmEsc(r.label)} 〔관측 밖〕\n`;
+    } else if(r.kind === "uself"){
+      out += `  ${MERMAID_ID(r.p)}-->>${MERMAID_ID(r.p)}: ${mmEsc(r.label)} 〔관측 밖〕\n`;
+    }
+    // uret: the dashed 관측 밖 call already conveys it — no separate return line.
+  }
+  return out;
+}
+
+function copyMermaid(btn){
+  const text = traceToMermaid(state.traces[state.traceIndex]);
+  const done = () => { const o = btn.textContent; btn.textContent = "복사됨 ✓";
+    setTimeout(() => { btn.textContent = o; }, 1200); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  } else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done){
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand("copy"); done(); } catch(e){}
+  document.body.removeChild(ta);
+}
+function downloadMermaid(){
+  const trace = state.traces[state.traceIndex];
+  const tag = (trace.sequenceTag || trace.traceId || "trace").replace(/[^\w.-]+/g, "_");
+  const md = `# FlowDoc sequence — ${tag}\n\n`
+    + (trace.error ? `> ⚠ 실패: ${trace.error}\n\n` : "")
+    + "```mermaid\n" + traceToMermaid(trace) + "```\n";
+  const blob = new Blob([md], { type: "text/markdown" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = `flowdoc-seq-${tag}.md`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(a.href);
+}
+
 /* ---------------- rendering: shells ---------------- */
 
 function render(){
@@ -574,11 +862,23 @@ function render(){
     ? `<div class="${flowCls}">${renderTreeNode(tree, true, false, "")}</div>`
     : `<p class="seq-desc">진입 노드 <code>${esc(seq.entry)}</code> 를 스펙에서 찾지 못했습니다.</p>`;
 
+  // Sequence lens is trace-driven: only offered while a recorded trace is replayed.
+  const hasTrace = state.traceIndex != null && state.traveledNodes;
+  const lens = hasTrace ? state.lens : "tree";
+  const lensToggle = hasTrace
+    ? `<div class="lens-toggle">`
+      + `<button data-lens="tree" class="${lens==="tree"?"active":""}">콜 트리</button>`
+      + `<button data-lens="sequence" class="${lens==="sequence"?"active":""}">시퀀스</button></div>`
+    : "";
+  const bodyHtml = (lens === "sequence")
+    ? renderSequence(state.traces[state.traceIndex])
+    : flowHtml;
+
   app.innerHTML = sidebarHtml(seqs) +
     `<main class="main">`
     + `<div class="seq-head">${routeHtml}<h1 class="seq-title">${esc(title)}</h1>`
-    + `<p class="seq-desc">${esc(desc)}</p></div>`
-    + flowHtml
+    + `<p class="seq-desc">${esc(desc)}</p>${lensToggle}</div>`
+    + bodyHtml
     + `</main>`;
   wireUp();
 }
@@ -712,6 +1012,13 @@ function wireUp(){
   document.querySelectorAll(".trace-item").forEach(btn => {
     btn.addEventListener("click", () => selectTrace(parseInt(btn.dataset.trace, 10)));
   });
+  document.querySelectorAll(".lens-toggle button").forEach(btn => {
+    btn.addEventListener("click", () => { state.lens = btn.dataset.lens; render(); });
+  });
+  const mmc = document.getElementById("mm-copy");
+  if(mmc) mmc.addEventListener("click", () => copyMermaid(mmc));
+  const mmd = document.getElementById("mm-dl");
+  if(mmd) mmd.addEventListener("click", downloadMermaid);
   const tc = document.getElementById("trace-clear");
   if(tc) tc.addEventListener("click", clearTrace);
   const tr = document.getElementById("trace-refresh");
