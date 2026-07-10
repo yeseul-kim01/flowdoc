@@ -171,7 +171,7 @@
     .main{padding:22px 16px 60px}
   }
 
-  /* ---- smell badges (feat/flowdoc-ui-insights) ----
+  /* ---- smell badges + reverse impact (feat/flowdoc-ui-insights) ----
      Kept in its own block, separate from the .b-warn cluster above, so it
      doesn't collide with PR #8's runtime-trace CSS insertion point. */
   .b-smell-err{background:var(--sem-bg);color:var(--sem);font-weight:600}
@@ -191,6 +191,9 @@
 
   .node.smell-flash{animation:smellFlash 1.1s ease}
   @keyframes smellFlash{0%{background:var(--accent-soft)}100%{background:var(--surface)}}
+
+  .node.impact-path{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+  .node.impact-target{border-width:2px;border-style:solid}
 </style>
 </head>
 <body>
@@ -210,7 +213,7 @@ const VERB = {
 const ENTRY_ANNS = new Set([...Object.keys(VERB),
   "KafkaListener","RabbitListener","JmsListener","EventListener","Scheduled","MessageMapping"]);
 
-const state = { spec:null, nodesById:{}, adjacency:{}, guardsById:{}, seqIndex:0 };
+const state = { spec:null, nodesById:{}, adjacency:{}, guardsById:{}, seqIndex:0, impactNodeId:null, impactNodeIds:null, currentTree:null };
 
 /* ---------------- loading ---------------- */
 
@@ -223,6 +226,7 @@ function indexSpec(spec){
   (spec.guards||[]).forEach(g => guardsById[g.nodeId] = g);
   state.spec = spec; state.nodesById = nodesById;
   state.adjacency = adjacency; state.guardsById = guardsById; state.seqIndex = 0;
+  state.impactNodeId = null; state.impactNodeIds = null;
 }
 
 function loadSpec(spec){
@@ -295,6 +299,77 @@ function buildTree(entryId){
     return tn;
   }
   return visit(entryId, 0);
+}
+
+/* ---------------- reverse impact analysis ---------------- */
+// Clicking a node highlights every root-to-node path in the CURRENT tree (id-based,
+// so a function called from several call sites gets all its paths lit up), and the
+// sidebar lists every entry-point sequence across the WHOLE spec that reaches it —
+// same reverse-BFS as `python -m flowdoc affects`, just run over the in-memory spec.
+
+function computeImpactSet(nodeId){
+  if(!nodeId || !state.currentTree) return null;
+  const ids = new Set();
+  (function walk(tn, path){
+    const path2 = path.concat(tn.id);
+    if(tn.id === nodeId) path2.forEach(id => ids.add(id));
+    tn.children.forEach(c => walk(c, path2));
+  })(state.currentTree, []);
+  return ids.size ? ids : null;
+}
+
+function applyImpactHighlight(){
+  document.querySelectorAll(".node[data-node-id]").forEach(el => {
+    const id = el.dataset.nodeId;
+    el.classList.toggle("impact-path", !!(state.impactNodeIds && state.impactNodeIds.has(id)));
+    el.classList.toggle("impact-target", id === state.impactNodeId);
+  });
+}
+
+function toggleImpact(nodeId){
+  state.impactNodeId = (state.impactNodeId === nodeId) ? null : nodeId;
+  state.impactNodeIds = computeImpactSet(state.impactNodeId);
+  applyImpactHighlight();
+  renderImpactPanel();
+}
+
+function selectSequence(i){
+  state.seqIndex = i;
+  state.impactNodeId = null; state.impactNodeIds = null;
+  render();
+}
+
+function reverseAdjacency(spec){
+  const rev = {};
+  (spec.edges||[]).forEach(e => { (rev[e.to] ||= []).push(e.from); });
+  return rev;
+}
+function reverseReachable(seedId, rev){
+  const seen = new Set();
+  const stack = [seedId];
+  while(stack.length){
+    const cur = stack.pop();
+    if(seen.has(cur)) continue;
+    seen.add(cur);
+    (rev[cur]||[]).forEach(p => stack.push(p));
+  }
+  return seen;
+}
+function affectedSequences(nodeId){
+  const spec = state.spec || {};
+  const upstream = reverseReachable(nodeId, reverseAdjacency(spec));
+  return (spec.sequences||[])
+    .filter(s => upstream.has(s.entry))
+    .sort((a,b) => (a.tag||"").localeCompare(b.tag||""));
+}
+
+function renderImpactPanel(){
+  const panel = document.getElementById("impact-panel");
+  if(!panel) return;
+  panel.innerHTML = impactPanelHtml();
+  panel.querySelectorAll(".seq-item").forEach(btn => {
+    btn.addEventListener("click", () => selectSequence(parseInt(btn.dataset.seq, 10)));
+  });
 }
 
 /* ---------------- rendering: signature & badges ---------------- */
@@ -470,6 +545,8 @@ function render(){
   const seq = seqs[Math.min(state.seqIndex, seqs.length-1)];
   const entryNode = state.nodesById[seq.entry];
   const tree = buildTree(seq.entry);
+  state.currentTree = tree;
+  state.impactNodeIds = computeImpactSet(state.impactNodeId);
 
   // Header trigger badge from the language-neutral seq.trigger (kind drives display).
   const trig = seq.trigger;
@@ -521,6 +598,29 @@ function smellPanelHtml(seq){
   return `<div class="sb-section-label" style="margin-top:14px">스멜 (${smells.length})</div>${body}`;
 }
 
+function impactPanelHtml(){
+  if(!state.impactNodeId){
+    return `<div class="sb-section-label" style="margin-top:14px">영향받는 시퀀스</div>`
+      + `<div class="specbox">노드를 클릭하면 이 노드에 도달하는 시퀀스를 보여줍니다.</div>`;
+  }
+  const affected = affectedSequences(state.impactNodeId);
+  if(!affected.length){
+    return `<div class="sb-section-label" style="margin-top:14px">영향받는 시퀀스</div>`
+      + `<div class="specbox">영향 없음 — 이 노드에 도달하는 진입점이 없습니다.</div>`;
+  }
+  const seqs = (state.spec && state.spec.sequences) || [];
+  const items = affected.map(s => {
+    const idx = seqs.indexOf(s);
+    const isCurrent = idx === state.seqIndex;
+    const sub = (s.trigger && s.trigger.label) || s.tag;
+    return `<button class="seq-item${isCurrent?" active":""}" data-seq="${idx}">`
+      + `<div class="stag">${esc(s.tag)}</div>`
+      + `<div class="sentry">${esc(sub)}${isCurrent?" · 현재 보는 중":""}</div></button>`;
+  }).join("");
+  return `<div class="sb-section-label" style="margin-top:14px">영향받는 시퀀스 (${affected.length})</div>`
+    + `<div class="seq-list">${items}</div>`;
+}
+
 function sidebarHtml(seqs){
   const spec = state.spec || {};
   const src = spec.source || {};
@@ -564,6 +664,7 @@ function sidebarHtml(seqs){
     + `<span class="chip"><span class="sw ext"></span>외부 호출</span>`
     + `</div></div>`
     + `<div>${smellPanelHtml(seq)}</div>`
+    + `<div id="impact-panel">${impactPanelHtml()}</div>`
     + `</aside>`;
 }
 
@@ -591,19 +692,18 @@ function wireUp(){
       const node = btn.closest(".node");
       const open = node.classList.toggle("open");
       btn.setAttribute("aria-expanded", open ? "true" : "false");
+      toggleImpact(node.dataset.nodeId);
     });
   });
   document.querySelectorAll(".seq-item").forEach(btn => {
-    btn.addEventListener("click", () => {
-      state.seqIndex = parseInt(btn.dataset.seq, 10);
-      render();
-    });
+    btn.addEventListener("click", () => selectSequence(parseInt(btn.dataset.seq, 10)));
   });
   document.querySelectorAll(".smell-row").forEach(btn => {
     btn.addEventListener("click", () => scrollToNode(btn.dataset.smellNode));
   });
   const lb = document.getElementById("loadbtn");
   if(lb) lb.addEventListener("click", () => document.getElementById("filein").click());
+  applyImpactHighlight();
 }
 
 document.getElementById("filein").addEventListener("change", e => {
