@@ -1,6 +1,6 @@
 # 0002 — 시퀀스 렌즈 (트레이스 → 시퀀스 다이어그램 + Mermaid export)
 
-- **상태**: 🚧 진행 — Phase 1 ✅ (인앱 시퀀스 뷰), Phase 2/3 대기
+- **상태**: 🚧 진행 — Phase 1 ✅ (인앱 시퀀스 뷰) · Phase 2 ✅ (Mermaid export), Phase 3 대기
 - **이슈**: [#10](https://github.com/yeseul-kim01/flowdoc/issues/10)
 - **브랜치**: `feat/sequence-lens`
 - **로드맵**: v0.3+ (0001 런타임 오버레이 위에 얹는 뷰). 기획안 §10 "트레이스 뷰"의 확장.
@@ -91,8 +91,12 @@ sequenceDiagram
   찾아 **회색 Note로 정직 표기**(실선 화살표 날조 안 함). async span은 다른 `thread`면 **점선 화살표**(0001
   Phase 2 스티칭 머지되면 실선 async 메시지로 표시). **`ui/`만, 스펙·스캐너 0수정.** node `--check` +
   stub 로직테스트(참가자/async/Note/에러 `--x`)로 검증, 라이브 `/flowdoc` 서빙 확인.
-- **Phase 2 — Mermaid export:** `sequenceDiagram` 텍스트 생성 + 복사/다운로드. GitHub PR·Confluence에
-  붙여 렌더 확인. 참가자 alias·escape·truncation 처리.
+- **Phase 2 — Mermaid export ✅:** SVG 뷰와 **단일 모델(`sequenceModel`) 공유** → 같은 트레이스에서
+  `sequenceDiagram` 텍스트 생성(관측 `->>`+activate/deactivate, async `-)`, 관측 밖 `-->>` 〔관측 밖〕,
+  실패 `--x` ✕ 메시지). 참가자 alias(`p0 as Owner`)·escape(`;`·개행·`#`)·**소스 호출 순서 인터리브**
+  (정적 엣지 순서로 관측/관측밖 배치 → async가 호출 지점에 표시). **⧉ Mermaid 복사**(clipboard+fallback) /
+  **↓ .md 다운로드**(```mermaid 펜스). node `--check` + Mermaid 구조 검증(participant 선언·activate/deactivate
+  균형·순서)로 확인.
 - **Phase 3 — 리치 표현:** tx 박스, async 병렬 lifeline(0001 Phase 2 스레드홉 의존), 리턴 화살표 토글.
 - **(선택) 정적 근사 시퀀스:** 트레이스가 없을 때 `edges[].site.line`로 호출 순서 근사, "정적 추정"으로 라벨.
 
