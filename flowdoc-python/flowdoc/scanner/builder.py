@@ -97,7 +97,7 @@ def _build_edge(edge: ResolvedEdge, root: Path) -> Edge:
     return Edge(
         from_id=edge.caller_id,
         to_id=edge.callee_id,
-        callType="sync",
+        callType=edge.call_type,
         site=Location(file=_relative_path(Path(edge.file), root), line=edge.line),
         resolution=edge.resolution,
     )

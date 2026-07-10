@@ -91,7 +91,7 @@ class Edge:
 
     from_id: str
     to_id: str
-    callType: str  # always "sync" in MVP
+    callType: str  # "sync" | "async" — async only for confidently-detected dispatch
     site: Location
     resolution: str  # "concrete" | "single-impl"
 

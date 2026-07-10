@@ -30,6 +30,7 @@ class ResolvedEdge:
     file: str
     line: int
     in_loop: bool = False  # the originating call site sits inside a loop
+    call_type: str = "sync"  # "sync" | "async" (from the originating CallSite)
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +207,7 @@ def resolve_call_sites(
                 file=str(cs.file),
                 line=cs.line,
                 in_loop=cs.in_loop,
+                call_type=cs.call_type,
             ))
 
     return resolved, n_ambiguous, n_external

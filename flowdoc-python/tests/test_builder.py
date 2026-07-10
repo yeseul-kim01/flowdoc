@@ -502,3 +502,65 @@ def test_sequence_title_and_description_none_without_docstring_or_summary(tmp_pa
     seq = next(s for s in spec.sequences if "GET" in s.tag)
     assert seq.title is None
     assert seq.description is None
+
+
+# ---------------------------------------------------------------------------
+# edges[].callType — async dispatch detection
+# ---------------------------------------------------------------------------
+
+def test_asyncio_create_task_edge_is_async(tmp_path: Path) -> None:
+    """asyncio.create_task(handler()) -> the edge to handler is callType='async'."""
+    spec = _scan(tmp_path, ("api.py", """
+        import asyncio
+
+        def issue() -> None:
+            asyncio.create_task(notify())
+
+        def notify() -> None:
+            pass
+    """))
+    edge = next(e for e in spec.edges if e.to_id.endswith("#notify()"))
+    assert edge.callType == "async"
+
+
+def test_background_tasks_add_task_edge_is_async(tmp_path: Path) -> None:
+    """BackgroundTasks.add_task(handler) -> a synthesized async edge to handler."""
+    spec = _scan(tmp_path, ("api.py", """
+        from fastapi import BackgroundTasks
+
+        def issue(tasks: BackgroundTasks) -> None:
+            tasks.add_task(notify)
+
+        def notify() -> None:
+            pass
+    """))
+    edge = next(e for e in spec.edges if e.to_id.endswith("#notify()"))
+    assert edge.callType == "async"
+
+
+def test_plain_call_edge_is_sync(tmp_path: Path) -> None:
+    """A direct call with no dispatch wrapper -> callType='sync' (baseline)."""
+    spec = _scan(tmp_path, ("api.py", """
+        def issue() -> None:
+            notify()
+
+        def notify() -> None:
+            pass
+    """))
+    edge = next(e for e in spec.edges if e.to_id.endswith("#notify()"))
+    assert edge.callType == "sync"
+
+
+def test_add_task_on_untyped_receiver_stays_sync(tmp_path: Path) -> None:
+    """`.add_task(...)` on a receiver NOT typed as BackgroundTasks is not
+    special-cased — no false positive from the method name alone."""
+    spec = _scan(tmp_path, ("api.py", """
+        def issue(tasks) -> None:
+            tasks.add_task(notify)
+
+        def notify() -> None:
+            pass
+    """))
+    # No synthesized async edge to notify() — the call site is only the
+    # (unresolvable) `tasks.add_task` attribute call itself.
+    assert not any(e.to_id.endswith("#notify()") for e in spec.edges)

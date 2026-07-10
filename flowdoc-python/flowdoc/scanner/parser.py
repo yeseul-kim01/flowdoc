@@ -53,6 +53,15 @@ _GUARD_SEMAPHORE_CTORS: frozenset[str] = frozenset({"Semaphore", "BoundedSemapho
 _GUARD_LOCK_CTORS: frozenset[str] = frozenset({"Lock", "RLock"})
 _GUARD_MODULES: frozenset[str] = frozenset({"asyncio", "threading"})
 
+# asyncio.create_task(...) / asyncio.ensure_future(...): the call passed as its
+# argument is dispatched fire-and-forget, not awaited synchronously.
+_ASYNC_TASK_CTORS: frozenset[str] = frozenset({"create_task", "ensure_future"})
+
+# starlette/FastAPI BackgroundTasks.add_task(func, *args, **kwargs): schedules
+# `func` to run after the response is sent — a reference, not an in-place call.
+_BACKGROUND_TASKS_TYPE: str = "BackgroundTasks"
+_BACKGROUND_TASKS_METHOD: str = "add_task"
+
 
 @dataclass
 class ParamInfo:
@@ -106,6 +115,7 @@ class CallSite:
     file: Path
     line: int
     in_loop: bool = False  # call occurs inside a for/while loop in the caller body
+    call_type: str = "sync"  # "sync" | "async" — async only for confidently-detected dispatch
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +450,10 @@ class _FileVisitor(ast.NodeVisitor):
         self.router_prefixes: dict[str, str] = {}
         # variable_name → {"type": "semaphore"|"lock", "permits": int|None}
         self.guard_vars: dict[str, dict] = {}
+        # id() of Call nodes passed to asyncio.create_task/ensure_future — dispatched async
+        self._async_wrapped: set[int] = set()
+        # local_types of the function currently being visited (for BackgroundTasks detection)
+        self._current_local_types: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Import tracking (for resolution hints — stored but used by resolver)
@@ -624,13 +638,16 @@ class _FileVisitor(ast.NodeVisitor):
         )
         self.definitions.append(func_def)
 
-        # Descend into body to collect call sites. Loop depth is function-scoped
-        # so a nested def inside a loop doesn't inherit the enclosing loop.
+        # Descend into body to collect call sites. Loop depth and local_types are
+        # function-scoped so a nested def doesn't inherit the enclosing one's.
         self._func_stack.append(node_id)
         saved_loop_depth = self._loop_depth
+        saved_local_types = self._current_local_types
         self._loop_depth = 0
+        self._current_local_types = local_types
         self.generic_visit(node)
         self._loop_depth = saved_loop_depth
+        self._current_local_types = saved_local_types
         self._func_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -643,6 +660,49 @@ class _FileVisitor(ast.NodeVisitor):
     # Call sites
     # ------------------------------------------------------------------
 
+    def _mark_async_task_dispatch(self, node: ast.Call) -> None:
+        """Flag ``asyncio.create_task(x())``/``ensure_future(x())`` — the argument
+        call ``x()`` is fire-and-forget dispatch, not a synchronous call."""
+        func = node.func
+        is_task_ctor = False
+        if isinstance(func, ast.Attribute) and func.attr in _ASYNC_TASK_CTORS:
+            if isinstance(func.value, ast.Name):
+                full = self._import_aliases.get(func.value.id, func.value.id)
+                is_task_ctor = full == "asyncio" or full.startswith("asyncio.")
+        elif isinstance(func, ast.Name) and func.id in _ASYNC_TASK_CTORS:
+            is_task_ctor = self._from_imports.get(func.id, "").startswith("asyncio.")
+        if is_task_ctor and node.args and isinstance(node.args[0], ast.Call):
+            self._async_wrapped.add(id(node.args[0]))
+
+    def _background_task_site(self, node: ast.Call, caller_id: str) -> Optional[CallSite]:
+        """``<BackgroundTasks var>.add_task(func, ...)`` schedules ``func`` to run
+        after the response is sent. ``func`` is a bare reference in the source
+        (not itself a Call), so it needs a synthesized async call site."""
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == _BACKGROUND_TASKS_METHOD):
+            return None
+        if not (isinstance(func.value, ast.Name) and node.args):
+            return None
+        receiver_type = self._current_local_types.get(func.value.id, "")
+        if _BACKGROUND_TASKS_TYPE not in receiver_type:
+            return None
+        target = node.args[0]
+        if isinstance(target, ast.Name):
+            callee_name, callee_receiver = target.id, None
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+            callee_name, callee_receiver = target.attr, target.value.id
+        else:
+            return None
+        return CallSite(
+            caller_id=caller_id,
+            callee_name=callee_name,
+            callee_receiver=callee_receiver,
+            file=self._file,
+            line=node.lineno,
+            in_loop=self._loop_depth > 0,
+            call_type="async",
+        )
+
     def visit_Call(self, node: ast.Call) -> None:
         if not self._func_stack:
             self.generic_visit(node)
@@ -650,6 +710,13 @@ class _FileVisitor(ast.NodeVisitor):
 
         caller_id = self._func_stack[-1]
         func = node.func
+
+        self._mark_async_task_dispatch(node)
+        bg_site = self._background_task_site(node, caller_id)
+        if bg_site is not None:
+            self.call_sites.append(bg_site)
+
+        call_type = "async" if id(node) in self._async_wrapped else "sync"
 
         if isinstance(func, ast.Name):
             # bare function call: some_func(...)
@@ -660,6 +727,7 @@ class _FileVisitor(ast.NodeVisitor):
                 file=self._file,
                 line=node.lineno,
                 in_loop=self._loop_depth > 0,
+                call_type=call_type,
             ))
         elif isinstance(func, ast.Attribute):
             # attribute call: obj.method(...)
@@ -676,6 +744,7 @@ class _FileVisitor(ast.NodeVisitor):
                 file=self._file,
                 line=node.lineno,
                 in_loop=self._loop_depth > 0,
+                call_type=call_type,
             ))
 
         self.generic_visit(node)
