@@ -146,8 +146,7 @@
     margin-right:5px}
   .seq-legend .l-obs::before{border-top:2px solid var(--accent)}
   .seq-legend .l-async::before{border-top:2px dashed var(--async)}
-  .seq-legend .l-unobs::before{border-top:0;width:9px;height:9px;border-radius:3px;background:#EEF0F3;
-    border:1px solid #CDD3DC;vertical-align:-1px}
+  .seq-legend .l-unobs::before{border-top:2px dashed #9AA3B2}
   .seq-legend .l-err::before{border-top:2px solid var(--sem)}
   .seqwrap{overflow-x:auto;padding:8px 4px 4px}
   .seqsvg{display:block}
@@ -162,10 +161,12 @@
   .seqsvg .msg.ret{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 4}
   .seqsvg .msg.async{stroke:var(--async);stroke-dasharray:5 4}
   .seqsvg .msg.err{stroke:var(--sem);stroke-width:1.5;stroke-dasharray:0}
+  .seqsvg .msg.unobs{stroke:#9AA3B2;stroke-width:1.3;stroke-dasharray:5 4}
+  .seqsvg .msg.uret{stroke:#C3C9D4;stroke-width:1;stroke-dasharray:3 4}
+  .seqsvg .act.unobs{fill:#F1F3F6;stroke:#B9C0CC}
   .seqsvg .mlabel{font-family:var(--mono);font-size:11.5px;fill:var(--ink)}
   .seqsvg .mlabel.err{fill:var(--sem);font-weight:600}
-  .seqsvg .note{fill:#EEF0F3;stroke:#CDD3DC;stroke-width:1;stroke-dasharray:3 3}
-  .seqsvg .notetx{font-family:var(--mono);font-size:10.5px;fill:#56627A}
+  .seqsvg .mlabel.unobs{fill:#56627A}
   .seq-empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:20px 4px}
 
   .tx-group{position:relative;margin-left:22px;padding-left:20px;
@@ -587,16 +588,21 @@ function spanOwner(nodeId){
 function spanSig(nodeId){ return (nodeId.split("#")[1]) || nodeId; }
 
 // Calls this frame makes that the agent can't observe (repo/external/self-invocation):
-// they have no span, so the sequence notes them rather than inventing an arrow.
-function unobservedCallees(nodeId){
-  const names = [];
+// they have no runtime span, but the static graph knows the edge. We draw them as
+// dashed "관측 밖" messages — visually distinct from observed (solid) calls, so we
+// surface the call without claiming we saw it run.
+function unobservedCalls(nodeId){
+  const out = [], seen = new Set();
   for(const e of (state.adjacency[nodeId] || [])){
     const child = state.nodesById[e.to];
-    const method = ((e.to.split("#")[1]) || "").split("(")[0] || e.to;
     const selfCall = idOwner(e.to) === idOwner(nodeId);
-    if(!child || isUnobservable(child) || selfCall) names.push(method);
+    if(!child || isUnobservable(child) || selfCall){
+      const owner = spanOwner(e.to), label = spanSig(e.to);
+      const key = owner + "|" + label;
+      if(!seen.has(key)){ seen.add(key); out.push({ owner, label, self: selfCall }); }
+    }
   }
-  return [...new Set(names)];
+  return out;
 }
 
 function spanForest(spans){
@@ -627,8 +633,9 @@ function renderSequence(trace){
   const addOwner = o => { if(!(o in pIndex)){ pIndex[o] = participants.length; participants.push(o); } };
   const rootThread = roots[0] && roots[0].thread;
 
-  const rows = [];   // {kind:'call'|'return'|'note', ...}
-  const acts = [];   // activation bars {p,y0,y1,err}
+  const rows = [];   // {kind:'call'|'return'|'ucall'|'uret'|'uself', ...}
+  const acts = [];   // observed activation bars {p,y0,y1,err}
+  const uacts = [];  // unobserved (관측 밖) activation bars {p,y0,y1}
   function walk(span, callerIdx){
     const owner = spanOwner(span.nodeId);
     addOwner(owner);
@@ -638,8 +645,19 @@ function renderSequence(trace){
     const y0 = rows.length;
     rows.push({ kind:"call", from:callerIdx, to, label:spanSig(span.nodeId), err, async });
     (kids[span.id] || []).forEach(c => walk(c, to));
-    const uc = unobservedCallees(span.nodeId);
-    if(uc.length) rows.push({ kind:"note", p:to, text:"관측 밖: " + uc.slice(0,3).join(", ") + (uc.length>3 ? " …" : "") });
+    // Unobserved calls this frame makes — drawn dashed/grey (no runtime span, static edge).
+    for(const uc of unobservedCalls(span.nodeId)){
+      addOwner(uc.owner);
+      const uto = pIndex[uc.owner];
+      if(uto === to){                         // self-invocation: a self-loop on this lifeline
+        rows.push({ kind:"uself", p:to, label:uc.label });
+      } else {
+        const uy0 = rows.length;
+        rows.push({ kind:"ucall", from:to, to:uto, label:uc.label });
+        rows.push({ kind:"uret", from:uto, to });
+        uacts.push({ p:uto, y0:uy0, y1:rows.length });
+      }
+    }
     const y1 = rows.length;
     rows.push({ kind:"return", from:to, to:callerIdx, err, async });
     acts.push({ p:to, y0, y1, err });
@@ -657,6 +675,7 @@ function renderSequence(trace){
     + `<marker id="ah" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--accent)"/></marker>`
     + `<marker id="ahx" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--sem)"/></marker>`
     + `<marker id="aha" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--async)"/></marker>`
+    + `<marker id="ahu" markerWidth="10" markerHeight="8" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#9AA3B2"/></marker>`
     + `</defs>`;
 
   participants.forEach((p,i) => {
@@ -666,6 +685,10 @@ function renderSequence(trace){
        + `<text x="${x}" y="35" text-anchor="middle">${esc(p)}</text></g>`;
   });
 
+  uacts.forEach(a => {
+    const x = laneX(a.p), y0 = rowY(a.y0), y1 = rowY(a.y1);
+    s += `<rect class="act unobs" x="${x-5}" y="${y0}" width="10" height="${Math.max(7, y1-y0)}" rx="2"/>`;
+  });
   acts.forEach(a => {
     const x = laneX(a.p), y0 = rowY(a.y0), y1 = rowY(a.y1);
     s += `<rect class="act${a.err ? " err" : ""}" x="${x-5}" y="${y0}" width="10" height="${Math.max(7, y1-y0)}" rx="2"/>`;
@@ -673,24 +696,30 @@ function renderSequence(trace){
 
   rows.forEach((r, idx) => {
     const y = rowY(idx);
-    if(r.kind === "note"){
+    // Self-invocation the agent can't see: a small dashed loop on its own lifeline.
+    if(r.kind === "uself"){
       const x = laneX(r.p);
-      const w = Math.min(COL-30, 16 + r.text.length * 6);
-      s += `<rect class="note" x="${x+9}" y="${y-9}" width="${w}" height="18" rx="5"/>`
-         + `<text class="notetx" x="${x+15}" y="${y+3.5}">${esc(r.text)}</text>`;
+      s += `<path class="msg unobs" d="M${x+5},${y-5} h20 v10 h-14" fill="none" marker-end="url(#ahu)"/>`
+         + `<text class="mlabel unobs" x="${x+30}" y="${y-1}">${esc(r.label)}</text>`;
       return;
     }
     if(r.kind === "return" && r.async) return;    // async is fire-and-forget: no return arrow
+    if(r.kind === "uret") {                         // dashed grey return, no label
+      const a1 = laneX(r.from), a2 = laneX(r.to), d = a2 > a1 ? 1 : -1;
+      s += `<line class="msg uret" x1="${a1 - d*5}" y1="${y}" x2="${a2 + d*5}" y2="${y}"/>`;
+      return;
+    }
     const x1 = laneX(r.from), x2 = laneX(r.to);
     if(x1 === x2) return;
     const dir = x2 > x1 ? 1 : -1;
-    const cls = r.kind === "call"
-      ? "msg call" + (r.err ? " err" : r.async ? " async" : "")
-      : "msg ret" + (r.err ? " err" : "");
-    const marker = r.err ? "ahx" : (r.kind === "call" && r.async ? "aha" : "ah");
+    let cls, marker;
+    if(r.kind === "ucall"){ cls = "msg unobs"; marker = "ahu"; }
+    else if(r.kind === "call"){ cls = "msg call" + (r.err ? " err" : r.async ? " async" : ""); marker = r.err ? "ahx" : r.async ? "aha" : "ah"; }
+    else { cls = "msg ret" + (r.err ? " err" : ""); marker = r.err ? "ahx" : "ah"; }
     s += `<line class="${cls}" x1="${x1 + dir*5}" y1="${y}" x2="${x2 - dir*5}" y2="${y}" marker-end="url(#${marker})"/>`;
-    if(r.kind === "call"){
-      s += `<text class="mlabel${r.err ? " err" : ""}" x="${(x1+x2)/2}" y="${y-6}" text-anchor="middle">${esc(r.label)}</text>`;
+    if(r.kind === "call" || r.kind === "ucall"){
+      const lc = r.kind === "ucall" ? " unobs" : (r.err ? " err" : "");
+      s += `<text class="mlabel${lc}" x="${(x1+x2)/2}" y="${y-6}" text-anchor="middle">${esc(r.label)}</text>`;
     } else if(r.err && r.to === 0){
       s += `<text class="mlabel err" x="${(x1+x2)/2}" y="${y-6}" text-anchor="middle">✕ ${esc(trace.error || "error")}</text>`;
     }
