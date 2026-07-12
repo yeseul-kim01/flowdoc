@@ -307,6 +307,35 @@ def test_guard_semaphore_async_with(tmp_path: Path) -> None:
     assert g.nodeId.endswith("#reserve(int)")
 
 
+def test_guard_semaphore_permits_from_module_constant(tmp_path: Path) -> None:
+    """Semaphore(CONCURRENCY) resolves permits from the module-level int constant."""
+    spec = _scan(tmp_path, ("svc.py", """
+        import asyncio
+        CONCURRENCY = 20
+        sem = asyncio.Semaphore(CONCURRENCY)
+
+        async def reserve(campaign_id: int) -> bool:
+            async with sem:
+                return True
+    """))
+    g = spec.guards[0]
+    assert g.permits == 20
+
+
+def test_guard_semaphore_permits_none_for_non_constant_name(tmp_path: Path) -> None:
+    """Semaphore(some_param) with no matching module constant -> permits stays
+    None rather than guessed (a function parameter isn't statically known)."""
+    spec = _scan(tmp_path, ("svc.py", """
+        import asyncio
+
+        async def reserve(concurrency: int, campaign_id: int) -> bool:
+            sem = asyncio.Semaphore(concurrency)
+            async with sem:
+                return True
+    """))
+    assert spec.guards[0].permits is None
+
+
 def test_guard_lock_threading(tmp_path: Path) -> None:
     """threading.Lock() + with → guard type='lock', no permits."""
     spec = _scan(tmp_path, ("svc.py", """

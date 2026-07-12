@@ -360,13 +360,20 @@ def _detect_data_access(
     return None
 
 
-def _guard_ctor(call: ast.expr, from_imports: dict[str, str]) -> Optional[dict]:
+def _guard_ctor(
+    call: ast.expr,
+    from_imports: dict[str, str],
+    module_constants: Optional[dict[str, int]] = None,
+) -> Optional[dict]:
     """Classify a value as a guard-primitive constructor, or None.
 
     Recognises ``asyncio.Semaphore(5)`` / ``threading.Lock()`` style attribute
     calls, and bare names (``Semaphore(5)``) only when a from-import resolves
     them to asyncio/threading — an unknown ``Lock()`` is more likely a false
-    positive than a guard. permits is captured for constants only.
+    positive than a guard. permits is captured for int literals, and for a
+    bare-name argument that resolves to a module-level int constant
+    (``CONCURRENCY = 20`` then ``Semaphore(CONCURRENCY)``) — anything else
+    (a parameter, a computed expression) is left as None rather than guessed.
     """
     if not isinstance(call, ast.Call):
         return None
@@ -383,7 +390,12 @@ def _guard_ctor(call: ast.expr, from_imports: dict[str, str]) -> Optional[dict]:
         permits: Optional[int] = 1  # asyncio/threading default when no arg is given
         if call.args:
             first = call.args[0]
-            permits = first.value if isinstance(first, ast.Constant) and isinstance(first.value, int) else None
+            if isinstance(first, ast.Constant) and isinstance(first.value, int):
+                permits = first.value
+            elif isinstance(first, ast.Name) and module_constants:
+                permits = module_constants.get(first.id)
+            else:
+                permits = None
         return {"type": "semaphore", "permits": permits}
     if ctor in _GUARD_LOCK_CTORS:
         return {"type": "lock", "permits": None}
@@ -454,6 +466,8 @@ class _FileVisitor(ast.NodeVisitor):
         self._async_wrapped: set[int] = set()
         # local_types of the function currently being visited (for BackgroundTasks detection)
         self._current_local_types: dict[str, str] = {}
+        # module-level NAME = <int literal> assignments (for Semaphore(CONST) permits)
+        self._module_constants: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Import tracking (for resolution hints — stored but used by resolver)
@@ -477,12 +491,16 @@ class _FileVisitor(ast.NodeVisitor):
     # ------------------------------------------------------------------
 
     def visit_Assign(self, node: ast.Assign) -> None:
-        """Capture APIRouter(prefix=...) bindings and guard-primitive assignments."""
+        """Capture APIRouter(prefix=...) bindings, guard-primitive assignments,
+        and module-level int constants (for resolving Semaphore(CONST) permits)."""
         if not (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
             self.generic_visit(node)
             return
+        if not self._func_stack and not self._class_stack:
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, int):
+                self._module_constants[node.targets[0].id] = node.value.value
         # Guard primitives are captured at any scope (module or function local)
-        guard = _guard_ctor(node.value, self._from_imports)
+        guard = _guard_ctor(node.value, self._from_imports, self._module_constants)
         if guard is not None:
             self.guard_vars[node.targets[0].id] = guard
         if self._func_stack or self._class_stack:
